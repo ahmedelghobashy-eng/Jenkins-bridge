@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.jetbrains.teamcity.jenkinsbridge</groupId>
+  <artifactId>jenkins-bridge</artifactId>
+  <version>1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+  <properties>
+      <teamcity-version>2026.2</teamcity-version>
+      <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+  <repositories>
+    <repository>
+        <id>JetBrains</id>
+        <url>https://download.jetbrains.com/teamcity-repository</url>
+    </repository>
+  </repositories>
+  <pluginRepositories>
+      <pluginRepository>
+          <id>JetBrains</id>
+          <url>https://download.jetbrains.com/teamcity-repository</url>
+      </pluginRepository>
+  </pluginRepositories>
+  <build>
+      <plugins>
+          <plugin>
+              <groupId>org.jetbrains.teamcity</groupId>
+              <artifactId>teamcity-sdk-maven-plugin</artifactId>
+              <version>0.4.1</version>
+              <configuration>
+                  <!-- <teamcityDir>/path/to/tc/distro</teamcityDir> -->
+              </configuration>
+          </plugin>
+      </plugins>
+      <pluginManagement>
+          <plugins>
+              <plugin>
+                  <groupId>org.jetbrains.teamcity</groupId>
+                  <artifactId>teamcity-sdk-maven-plugin</artifactId>
+                  <version>0.4.3</version>
+                  <configuration>
+                      <!-- <teamcityDir>/path/to/tc/distro</teamcityDir> -->
+                  </configuration>
+              </plugin>
+          </plugins>
+      </pluginManagement>
+  </build>
+  <modules>
+    <module>jenkins-bridge-server</module>
+    <module>build</module>
+  </modules>
+  <profiles>
+    <profile>
+      <id>local-teamcity-eap</id>
+      <repositories>
+        <repository>
+          <id>local-teamcity-eap</id>
+          <url>file://${user.home}/.m2/repository/TeamCity</url>
+        </repository>
+      </repositories>
+    </profile>
+  </profiles>
+</project>
