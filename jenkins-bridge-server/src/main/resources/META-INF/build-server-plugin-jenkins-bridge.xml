@@ -13,6 +13,9 @@
   <bean id="jenkinsClient"
         class="com.jetbrains.teamcity.jenkinsbridge.jenkins.JenkinsClient"/>
 
+  <bean id="teamCityClient"
+        class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityClient"/>
+
   <bean id="jenkinsBuildMappingStore"
         class="com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildMappingStore"/>
 

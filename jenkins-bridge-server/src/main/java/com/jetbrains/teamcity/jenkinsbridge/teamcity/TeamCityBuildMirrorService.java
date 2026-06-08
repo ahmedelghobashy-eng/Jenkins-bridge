@@ -1,13 +1,6 @@
 package com.jetbrains.teamcity.jenkinsbridge.teamcity;
 
-import com.google.gson.Gson;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpClient;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpException;
-import com.jetbrains.teamcity.jenkinsbridge.jenkins.JenkinsClient;
 import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildMapping;
 import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildMappingStore;
 import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildState;
@@ -19,6 +12,8 @@ import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.TimeZone;
 
@@ -30,18 +25,16 @@ public class TeamCityBuildMirrorService {
   ));
 
   private final JenkinsBridgeSettings settings;
-  private final BridgeHttpClient httpClient;
+  private final TeamCityClient teamCityClient;
   private final JenkinsBuildMappingStore mappingStore;
-  private final Gson gson = new Gson();
-  private final JsonParser jsonParser = new JsonParser();
 
   public TeamCityBuildMirrorService(
       JenkinsBridgeSettings settings,
-      BridgeHttpClient httpClient,
+      TeamCityClient teamCityClient,
       JenkinsBuildMappingStore mappingStore
   ) {
     this.settings = settings;
-    this.httpClient = httpClient;
+    this.teamCityClient = teamCityClient;
     this.mappingStore = mappingStore;
   }
 
@@ -51,7 +44,7 @@ public class TeamCityBuildMirrorService {
       return mapping.getTeamCityBuildId();
     }
 
-    Long restoredBuildId = findExistingTeamCityBuildId(mapping.getJenkinsBuildKey());
+    Long restoredBuildId = teamCityClient.findBuildIdByJenkinsBuildKey(mapping.getJenkinsBuildKey());
     if (restoredBuildId != null) {
       mapping.setTeamCityBuildId(restoredBuildId);
       mapping.setState(JenkinsBuildState.TEAMCITY_CREATED);
@@ -60,32 +53,13 @@ public class TeamCityBuildMirrorService {
       return restoredBuildId;
     }
 
-    JsonObject payload = new JsonObject();
-    JsonObject buildType = new JsonObject();
-    buildType.addProperty("id", settings.getTeamCityBuildTypeId());
-    payload.add("buildType", buildType);
+    Map<String, String> properties = new LinkedHashMap<String, String>();
+    properties.put("jenkins.job", mapping.getJenkinsJob());
+    properties.put("jenkins.build.number", String.valueOf(mapping.getJenkinsBuildNumber()));
+    properties.put("jenkins.build.key", mapping.getJenkinsBuildKey());
+    properties.put("jenkins.build.url", nullToEmpty(jenkinsInfo.getUrl()));
 
-    JsonArray properties = new JsonArray();
-    addProperty(properties, "teamcity.build.agentLess", "true");
-    addProperty(properties, "jenkins.job", mapping.getJenkinsJob());
-    addProperty(properties, "jenkins.build.number", String.valueOf(mapping.getJenkinsBuildNumber()));
-    addProperty(properties, "jenkins.build.key", mapping.getJenkinsBuildKey());
-    addProperty(properties, "jenkins.build.url", nullToEmpty(jenkinsInfo.getUrl()));
-
-    JsonObject propertiesWrapper = new JsonObject();
-    propertiesWrapper.add("property", properties);
-    payload.add("properties", propertiesWrapper);
-
-    String response = httpClient.post(
-        teamCityApi("/buildQueue"),
-        settings.getTeamCityUser(),
-        settings.getTeamCityPassword(),
-        gson.toJson(payload),
-        "application/json",
-        "application/json"
-    );
-
-    long buildId = jsonParser.parse(response).getAsJsonObject().get("id").getAsLong();
+    long buildId = teamCityClient.queueAgentlessBuild(settings.getTeamCityBuildTypeId(), properties);
     mapping.setTeamCityBuildId(buildId);
     mapping.setState(JenkinsBuildState.TEAMCITY_CREATED);
     mapping.setLastError(null);
@@ -102,14 +76,7 @@ public class TeamCityBuildMirrorService {
     String text = "Monitoring Jenkins job " + mapping.getJenkinsJob()
         + " build #" + mapping.getJenkinsBuildNumber();
 
-    httpClient.put(
-        teamCityApi("/builds/id:" + teamCityBuildId + "/runningData"),
-        settings.getTeamCityUser(),
-        settings.getTeamCityPassword(),
-        text,
-        "text/plain",
-        null
-    );
+    teamCityClient.markBuildAsRunning(teamCityBuildId, text);
 
     mapping.setState(JenkinsBuildState.RUNNING_SENT);
     mapping.setLastError(null);
@@ -128,7 +95,7 @@ public class TeamCityBuildMirrorService {
         + "Jenkins build URL: " + nullToEmpty(mapping.getJenkinsBuildUrl()) + "\n"
         + "\n";
 
-    postBuildLog(teamCityBuildId, text);
+    teamCityClient.addBuildLog(teamCityBuildId, text);
 
     mapping.setMetadataLogSent(true);
     mapping.setState(JenkinsBuildState.LOG_SYNCING);
@@ -148,7 +115,7 @@ public class TeamCityBuildMirrorService {
       return;
     }
 
-    postBuildLog(teamCityBuildId, newLog);
+    teamCityClient.addBuildLog(teamCityBuildId, newLog);
 
     mapping.setLastLogOffset(consoleText.length());
     mapping.setState(JenkinsBuildState.LOG_SYNCING);
@@ -176,7 +143,7 @@ public class TeamCityBuildMirrorService {
           + "Jenkins result: " + finalResult + "\n"
           + "Jenkins duration: " + jenkinsInfo.getDuration() + " ms\n";
 
-      postBuildLog(teamCityBuildId, summary);
+      teamCityClient.addBuildLog(teamCityBuildId, summary);
 
       mapping.setSummaryLogSent(true);
       mapping.setJenkinsResult(finalResult);
@@ -186,14 +153,7 @@ public class TeamCityBuildMirrorService {
 
     String finishDate = formatTeamCityFinishDate(jenkinsInfo);
 
-    httpClient.put(
-        teamCityApi("/builds/id:" + teamCityBuildId + "/finishDate"),
-        settings.getTeamCityUser(),
-        settings.getTeamCityPassword(),
-        finishDate,
-        "text/plain",
-        null
-    );
+    teamCityClient.setBuildFinishDate(teamCityBuildId, finishDate);
 
     mapping.setState(JenkinsBuildState.TEAMCITY_FINISHED);
     mapping.setJenkinsResult(finalResult);
@@ -202,63 +162,11 @@ public class TeamCityBuildMirrorService {
     mappingStore.saveMapping(mapping);
   }
 
-  private Long findExistingTeamCityBuildId(String jenkinsBuildKey) throws BridgeHttpException {
-    String locator = "property:(name:jenkins.build.key,value:" + jenkinsBuildKey + "),count:1,defaultFilter:false";
-    String url = teamCityApi("/builds?locator=" + JenkinsClient.encodeQueryValue(locator)
-        + "&fields=" + JenkinsClient.encodeQueryValue("build(id)"));
-
-    String response = httpClient.get(
-        url,
-        settings.getTeamCityUser(),
-        settings.getTeamCityPassword(),
-        "application/json"
-    );
-
-    JsonObject root = jsonParser.parse(response).getAsJsonObject();
-    JsonArray builds = root.getAsJsonArray("build");
-    if (builds == null || builds.size() == 0) {
-      return null;
-    }
-
-    JsonElement id = builds.get(0).getAsJsonObject().get("id");
-    if (id == null || id.isJsonNull()) {
-      return null;
-    }
-
-    return id.getAsLong();
-  }
-
-  private void postBuildLog(long teamCityBuildId, String text) throws BridgeHttpException {
-    if (text == null || text.length() == 0) {
-      return;
-    }
-
-    httpClient.post(
-        teamCityApi("/builds/id:" + teamCityBuildId + "/log"),
-        settings.getTeamCityUser(),
-        settings.getTeamCityPassword(),
-        text,
-        "text/plain",
-        null
-    );
-  }
-
   private String formatTeamCityFinishDate(JenkinsBuildInfo jenkinsInfo) {
     long finishMillis = jenkinsInfo.getTimestamp() + Math.max(0L, jenkinsInfo.getDuration());
     SimpleDateFormat formatter = new SimpleDateFormat("yyyyMMdd'T'HHmmssZ");
     formatter.setTimeZone(TimeZone.getTimeZone(settings.getZoneId()));
     return formatter.format(new Date(finishMillis));
-  }
-
-  private String teamCityApi(String path) {
-    return settings.getTeamCityUrl() + "/app/rest" + path;
-  }
-
-  private void addProperty(JsonArray properties, String name, String value) {
-    JsonObject property = new JsonObject();
-    property.addProperty("name", name);
-    property.addProperty("value", nullToEmpty(value));
-    properties.add(property);
   }
 
   private String nullToEmpty(String value) {

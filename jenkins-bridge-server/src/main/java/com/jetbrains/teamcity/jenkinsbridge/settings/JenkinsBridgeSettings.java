@@ -20,7 +20,6 @@ public class JenkinsBridgeSettings {
   private final String timeZone;
   private final String stateFile;
 
-  // TODO we should remove teamcCity related stuff and use the server side api.
   private JenkinsBridgeSettings(
       boolean enabled,
       String jenkinsUrl,

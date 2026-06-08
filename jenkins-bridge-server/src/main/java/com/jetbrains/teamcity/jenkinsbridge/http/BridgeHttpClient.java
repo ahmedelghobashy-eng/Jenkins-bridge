@@ -21,7 +21,6 @@ public class BridgeHttpClient {
   public String put(String url, String user, String password, String body, String contentType, String accept) throws BridgeHttpException {
     return request("PUT", url, user, password, body, contentType, accept);
   }
-// Sends an HTTP request and reads the response and returns String response body
   private String request(
       String method,
       String url,
@@ -39,7 +38,6 @@ public class BridgeHttpClient {
       connection.setConnectTimeout(30000);
       connection.setReadTimeout(30000);
 
-      // TODO do we need the is not blank?
       if (isNotBlank(user)) {
         String token = user + ":" + nullToEmpty(password);
         String encoded = Base64.getEncoder().encodeToString(token.getBytes(StandardCharsets.UTF_8));
@@ -68,7 +66,6 @@ public class BridgeHttpClient {
       int status = connection.getResponseCode();
       String responseBody = readResponseBody(connection, status);
 
-      // Do we need this?
       if (status < 200 || status >= 300) {
         throw new BridgeHttpException(method, url, status, responseBody);
       }

@@ -62,7 +62,7 @@ Current scope:
    settings
    model
    http
--> maybe move shared http package under jenkins after TeamCity no longer uses REST?
+-> keep shared http package while both Jenkins and TeamCity use REST/HTTP.
 -> maybe rename the polling package name to something more descriptive to show that it is the main part of the plugin?
 
 2. Testing
@@ -74,12 +74,12 @@ Current scope:
    finish date formatting
    mocked REST calls
 
-3. Move TeamCity REST usage to TeamCity server-side API
-   Remove TeamCity username/password from plugin config.
-   Replace internal TeamCity REST calls with TeamCity server services.
+3. Keep TeamCity REST usage behind a TeamCityClient - done
+   Keep TeamCity username/password in plugin config.
+   Keep TeamCity calls on the supported REST API contract.
    Keep Jenkins access over HTTP.
-   After TeamCity no longer uses REST, move the shared http package under jenkins
-   because HTTP will be Jenkins-only.
+   Keep TeamCity REST access over HTTP.
+   Do not call TeamCity internal server implementation classes directly.
 
 Future plans:
 

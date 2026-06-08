@@ -3,3 +3,7 @@ target/
 .idea/
 *.iml
 .DS_Store
+
+# Local agent handoff files
+/AGENTS.md
+/PROGRESS.md
