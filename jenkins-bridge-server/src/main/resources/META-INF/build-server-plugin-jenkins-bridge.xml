@@ -15,6 +15,15 @@
   <bean id="teamCityClient"
         class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityClient"/>
 
+  <bean id="teamCityBuildQueuer"
+        class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildQueuer"/>
+
+  <bean id="teamCityBuildStarter"
+        class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildStarter"/>
+
+  <bean id="teamCityBuildLogger"
+        class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildLogger"/>
+
   <bean id="teamCityBuildFinisher"
         class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildFinisher"/>
 

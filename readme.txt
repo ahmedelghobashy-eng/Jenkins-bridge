@@ -101,18 +101,20 @@ Current scope:
 3. Keep TeamCity REST usage behind a TeamCityClient - done
    Keep TeamCity username/password in plugin config.
    Keep Jenkins access over HTTP.
-   Keep remaining TeamCity REST access over HTTP while migration is incremental.
-   TeamCity build finish has started moving to server-side API through an isolated
-   TeamCityBuildFinisher adapter. This adapter currently uses TeamCity internal
-   server classes because the matching REST endpoint delegates to internal code.
+   TeamCity REST is now active only for restore lookup by jenkins.build.key.
+   Queue creation, runningData/start, log append, and finish are handled through
+   isolated server-side adapters. Deprecated REST mutation methods remain in
+   TeamCityClient only as temporary fallback code while runtime testing continues.
+   Some adapters use TeamCity internal server classes because the matching REST
+   endpoints delegate to internal code.
 
 Future plans:
 
 1. Save state somewhere other than JSON.
 2. Improve handling for TeamCity down, Jenkins down, restarts, and recovery cases.
 3. Continue TeamCity server-side API migration in slices:
-   finishDate - in progress
-   log
-   runningData
-   buildQueue
-   build restore lookup
+   finishDate - implemented
+   log - implemented
+   runningData - implemented
+   buildQueue - implemented
+   build restore lookup - shelved for more research

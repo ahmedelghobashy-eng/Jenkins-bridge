@@ -55,6 +55,7 @@ public class TeamCityClient {
     return id.getAsLong();
   }
 
+  @Deprecated
   public long queueAgentlessBuild(String buildTypeId, Map<String, String> properties) throws BridgeHttpException {
     JenkinsBridgeSettings settings = settingsProvider.load();
     JsonObject payload = new JsonObject();
@@ -84,6 +85,7 @@ public class TeamCityClient {
     return parseJsonObject(response).get("id").getAsLong();
   }
 
+  @Deprecated
   public void markBuildAsRunning(long buildId, String requestor) throws BridgeHttpException {
     JenkinsBridgeSettings settings = settingsProvider.load();
     httpClient.put(
@@ -96,6 +98,7 @@ public class TeamCityClient {
     );
   }
 
+  @Deprecated
   public void addBuildLog(long buildId, String text) throws BridgeHttpException {
     if (text == null || text.length() == 0) {
       return;
@@ -112,6 +115,7 @@ public class TeamCityClient {
     );
   }
 
+  @Deprecated
   public void setBuildFinishDate(long buildId, String finishDate) throws BridgeHttpException {
     JenkinsBridgeSettings settings = settingsProvider.load();
     httpClient.put(

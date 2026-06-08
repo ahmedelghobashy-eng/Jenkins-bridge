@@ -27,17 +27,26 @@ public class TeamCityBuildMirrorService {
 
   private final JenkinsBridgeSettingsProvider settingsProvider;
   private final TeamCityClient teamCityClient;
+  private final TeamCityBuildQueuer teamCityBuildQueuer;
+  private final TeamCityBuildStarter teamCityBuildStarter;
+  private final TeamCityBuildLogger teamCityBuildLogger;
   private final TeamCityBuildFinisher teamCityBuildFinisher;
   private final JenkinsBuildMappingStore mappingStore;
 
   public TeamCityBuildMirrorService(
       JenkinsBridgeSettingsProvider settingsProvider,
       TeamCityClient teamCityClient,
+      TeamCityBuildQueuer teamCityBuildQueuer,
+      TeamCityBuildStarter teamCityBuildStarter,
+      TeamCityBuildLogger teamCityBuildLogger,
       TeamCityBuildFinisher teamCityBuildFinisher,
       JenkinsBuildMappingStore mappingStore
   ) {
     this.settingsProvider = settingsProvider;
     this.teamCityClient = teamCityClient;
+    this.teamCityBuildQueuer = teamCityBuildQueuer;
+    this.teamCityBuildStarter = teamCityBuildStarter;
+    this.teamCityBuildLogger = teamCityBuildLogger;
     this.teamCityBuildFinisher = teamCityBuildFinisher;
     this.mappingStore = mappingStore;
   }
@@ -63,7 +72,7 @@ public class TeamCityBuildMirrorService {
     properties.put("jenkins.build.key", mapping.getJenkinsBuildKey());
     properties.put("jenkins.build.url", nullToEmpty(jenkinsInfo.getUrl()));
 
-    long buildId = teamCityClient.queueAgentlessBuild(settingsProvider.load().getTeamCityBuildTypeId(), properties);
+    long buildId = teamCityBuildQueuer.queueAgentlessBuild(settingsProvider.load().getTeamCityBuildTypeId(), properties);
     mapping.setTeamCityBuildId(buildId);
     mapping.setState(JenkinsBuildState.TEAMCITY_CREATED);
     mapping.setLastError(null);
@@ -80,7 +89,7 @@ public class TeamCityBuildMirrorService {
     String text = "Monitoring Jenkins job " + mapping.getJenkinsJob()
         + " build #" + mapping.getJenkinsBuildNumber();
 
-    teamCityClient.markBuildAsRunning(teamCityBuildId, text);
+    teamCityBuildStarter.markBuildAsRunning(teamCityBuildId, text);
 
     mapping.setState(JenkinsBuildState.RUNNING_SENT);
     mapping.setLastError(null);
@@ -99,7 +108,7 @@ public class TeamCityBuildMirrorService {
         + "Jenkins build URL: " + nullToEmpty(mapping.getJenkinsBuildUrl()) + "\n"
         + "\n";
 
-    teamCityClient.addBuildLog(teamCityBuildId, text);
+    teamCityBuildLogger.addBuildLog(teamCityBuildId, text);
 
     mapping.setMetadataLogSent(true);
     mapping.setState(JenkinsBuildState.LOG_SYNCING);
@@ -119,7 +128,7 @@ public class TeamCityBuildMirrorService {
       return;
     }
 
-    teamCityClient.addBuildLog(teamCityBuildId, newLog);
+    teamCityBuildLogger.addBuildLog(teamCityBuildId, newLog);
 
     mapping.setLastLogOffset(consoleText.length());
     mapping.setState(JenkinsBuildState.LOG_SYNCING);
@@ -147,7 +156,7 @@ public class TeamCityBuildMirrorService {
           + "Jenkins result: " + finalResult + "\n"
           + "Jenkins duration: " + jenkinsInfo.getDuration() + " ms\n";
 
-      teamCityClient.addBuildLog(teamCityBuildId, summary);
+      teamCityBuildLogger.addBuildLog(teamCityBuildId, summary);
 
       mapping.setSummaryLogSent(true);
       mapping.setJenkinsResult(finalResult);
