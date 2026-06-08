@@ -5,6 +5,7 @@ import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildMapping;
 import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildMappingStore;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettings;
+import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettingsProvider;
 import com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildMirrorService;
 
 import java.util.Collections;
@@ -20,7 +21,7 @@ import java.util.logging.Logger;
 public class JenkinsBridgePollingService {
   private static final Logger LOG = Logger.getLogger(JenkinsBridgePollingService.class.getName());
 
-  private final JenkinsBridgeSettings settings;
+  private final JenkinsBridgeSettingsProvider settingsProvider;
   private final JenkinsClient jenkinsClient;
   private final TeamCityBuildMirrorService mirrorService;
   private final JenkinsBuildMappingStore mappingStore;
@@ -28,18 +29,21 @@ public class JenkinsBridgePollingService {
   private ScheduledExecutorService executorService;
 
   public JenkinsBridgePollingService(
-      JenkinsBridgeSettings settings,
+      JenkinsBridgeSettingsProvider settingsProvider,
       JenkinsClient jenkinsClient,
       TeamCityBuildMirrorService mirrorService,
       JenkinsBuildMappingStore mappingStore
   ) {
-    this.settings = settings;
+    this.settingsProvider = settingsProvider;
     this.jenkinsClient = jenkinsClient;
     this.mirrorService = mirrorService;
     this.mappingStore = mappingStore;
   }
 
   public void start() {
+    JenkinsBridgeSettings settings = settingsProvider.load();
+    LOG.info("[Jenkins Bridge DEBUG] Loaded settings: " + settings.describeForLog());
+
     if (!settings.isEnabled()) {
       LOG.info("Jenkins Bridge polling is disabled");
       return;
@@ -58,6 +62,9 @@ public class JenkinsBridgePollingService {
     });
 
     LOG.info("Starting Jenkins Bridge polling; state file: " + mappingStore.getStateFile());
+    LOG.info("[Jenkins Bridge DEBUG] Scheduling poller every " + settings.getPollSeconds()
+        + " seconds for Jenkins job " + settings.getJenkinsJob()
+        + " and TeamCity build type " + settings.getTeamCityBuildTypeId());
     executorService.scheduleWithFixedDelay(new Runnable() {
       public void run() {
         pollOnceSafely();
@@ -77,8 +84,10 @@ public class JenkinsBridgePollingService {
 
   private void pollOnceSafely() {
     try {
+      LOG.info("[Jenkins Bridge DEBUG] Poll cycle started");
       pollOnce();
       mappingStore.markPollSuccess();
+      LOG.info("[Jenkins Bridge DEBUG] Poll cycle completed");
     } catch (Exception e) {
       mappingStore.markPollError(e);
       LOG.log(Level.WARNING, "Jenkins Bridge polling failed", e);
@@ -86,6 +95,7 @@ public class JenkinsBridgePollingService {
   }
 
   private void pollOnce() throws Exception {
+    JenkinsBridgeSettings settings = settingsProvider.load();
     if (!settings.hasMinimumConfiguration()) {
       throw new IllegalStateException(settings.describeMinimumConfigurationProblem());
     }
@@ -94,13 +104,21 @@ public class JenkinsBridgePollingService {
         settings.getJenkinsJob(),
         settings.getRecentBuildLimit()
     );
+    LOG.info("[Jenkins Bridge DEBUG] Jenkins returned " + recentBuilds.size()
+        + " recent build(s) for job " + settings.getJenkinsJob());
     Collections.reverse(recentBuilds);
 
     for (JenkinsBuildInfo recentBuild : recentBuilds) {
       JenkinsBuildInfo buildInfo = jenkinsClient.getBuildInfo(settings.getJenkinsJob(), recentBuild.getNumber());
       JenkinsBuildMapping mapping = mappingStore.getOrCreateMapping(settings.getJenkinsJob(), buildInfo);
       try {
+        LOG.info("[Jenkins Bridge DEBUG] Syncing Jenkins build " + mapping.getJenkinsBuildKey()
+            + " in state " + mapping.getState()
+            + " with TeamCity build id " + mapping.getTeamCityBuildId());
         syncBuild(mapping, buildInfo);
+        LOG.info("[Jenkins Bridge DEBUG] Synced Jenkins build " + mapping.getJenkinsBuildKey()
+            + " now in state " + mapping.getState()
+            + " with TeamCity build id " + mapping.getTeamCityBuildId());
       } catch (Exception e) {
         mappingStore.markBuildError(mapping, e);
         LOG.log(Level.WARNING, "Failed to sync Jenkins build " + mapping.getJenkinsBuildKey(), e);
@@ -114,6 +132,9 @@ public class JenkinsBridgePollingService {
     mirrorService.ensureMetadataLogSent(mapping, teamCityBuildId);
 
     String consoleText = jenkinsClient.getConsoleText(mapping.getJenkinsJob(), mapping.getJenkinsBuildNumber());
+    LOG.info("[Jenkins Bridge DEBUG] Read " + consoleText.length()
+        + " console character(s) for " + mapping.getJenkinsBuildKey()
+        + "; previous offset " + mapping.getLastLogOffset());
     mirrorService.syncLogs(mapping, teamCityBuildId, consoleText);
     mirrorService.finishBuildIfNeeded(mapping, teamCityBuildId, buildInfo);
   }

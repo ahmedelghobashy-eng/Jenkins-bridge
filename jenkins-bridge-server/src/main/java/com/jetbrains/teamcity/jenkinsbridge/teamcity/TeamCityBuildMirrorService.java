@@ -6,6 +6,7 @@ import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildMappingStore;
 import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildState;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettings;
+import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettingsProvider;
 
 import java.io.IOException;
 import java.text.SimpleDateFormat;
@@ -24,16 +25,16 @@ public class TeamCityBuildMirrorService {
       JenkinsBuildState.TEAMCITY_FINISHED
   ));
 
-  private final JenkinsBridgeSettings settings;
+  private final JenkinsBridgeSettingsProvider settingsProvider;
   private final TeamCityClient teamCityClient;
   private final JenkinsBuildMappingStore mappingStore;
 
   public TeamCityBuildMirrorService(
-      JenkinsBridgeSettings settings,
+      JenkinsBridgeSettingsProvider settingsProvider,
       TeamCityClient teamCityClient,
       JenkinsBuildMappingStore mappingStore
   ) {
-    this.settings = settings;
+    this.settingsProvider = settingsProvider;
     this.teamCityClient = teamCityClient;
     this.mappingStore = mappingStore;
   }
@@ -59,7 +60,7 @@ public class TeamCityBuildMirrorService {
     properties.put("jenkins.build.key", mapping.getJenkinsBuildKey());
     properties.put("jenkins.build.url", nullToEmpty(jenkinsInfo.getUrl()));
 
-    long buildId = teamCityClient.queueAgentlessBuild(settings.getTeamCityBuildTypeId(), properties);
+    long buildId = teamCityClient.queueAgentlessBuild(settingsProvider.load().getTeamCityBuildTypeId(), properties);
     mapping.setTeamCityBuildId(buildId);
     mapping.setState(JenkinsBuildState.TEAMCITY_CREATED);
     mapping.setLastError(null);
@@ -165,7 +166,7 @@ public class TeamCityBuildMirrorService {
   private String formatTeamCityFinishDate(JenkinsBuildInfo jenkinsInfo) {
     long finishMillis = jenkinsInfo.getTimestamp() + Math.max(0L, jenkinsInfo.getDuration());
     SimpleDateFormat formatter = new SimpleDateFormat("yyyyMMdd'T'HHmmssZ");
-    formatter.setTimeZone(TimeZone.getTimeZone(settings.getZoneId()));
+    formatter.setTimeZone(TimeZone.getTimeZone(settingsProvider.load().getZoneId()));
     return formatter.format(new Date(finishMillis));
   }
 

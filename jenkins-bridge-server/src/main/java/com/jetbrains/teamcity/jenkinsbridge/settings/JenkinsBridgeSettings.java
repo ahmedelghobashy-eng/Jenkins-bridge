@@ -20,7 +20,7 @@ public class JenkinsBridgeSettings {
   private final String timeZone;
   private final String stateFile;
 
-  private JenkinsBridgeSettings(
+  JenkinsBridgeSettings(
       boolean enabled,
       String jenkinsUrl,
       String jenkinsUser,
@@ -128,6 +128,22 @@ public class JenkinsBridgeSettings {
     return Paths.get(stateFile);
   }
 
+  public String describeForLog() {
+    return "enabled=" + enabled
+        + ", jenkinsUrl=" + jenkinsUrl
+        + ", jenkinsUser=" + jenkinsUser
+        + ", jenkinsToken=" + redact(jenkinsToken)
+        + ", jenkinsJob=" + jenkinsJob
+        + ", teamCityUrl=" + teamCityUrl
+        + ", teamCityUser=" + teamCityUser
+        + ", teamCityPassword=" + redact(teamCityPassword)
+        + ", teamCityBuildTypeId=" + teamCityBuildTypeId
+        + ", pollSeconds=" + pollSeconds
+        + ", recentBuildLimit=" + recentBuildLimit
+        + ", timeZone=" + timeZone
+        + ", stateFile=" + stateFile;
+  }
+
   public boolean hasMinimumConfiguration() {
     return isNotBlank(jenkinsUrl)
         && isNotBlank(jenkinsJob)
@@ -153,6 +169,7 @@ public class JenkinsBridgeSettings {
     }
   }
 
+
   private static String getString(String propertyName, String environmentName, String defaultValue) {
     String value = System.getProperty(propertyName);
     if (isNotBlank(value)) {
@@ -169,6 +186,10 @@ public class JenkinsBridgeSettings {
 
   private static int getInt(String propertyName, String environmentName, int defaultValue) {
     String value = getString(propertyName, environmentName, String.valueOf(defaultValue));
+    return parseInt(value, defaultValue);
+  }
+
+  private static int parseInt(String value, int defaultValue) {
     try {
       return Integer.parseInt(value);
     } catch (NumberFormatException e) {
@@ -178,6 +199,10 @@ public class JenkinsBridgeSettings {
 
   private static boolean getBoolean(String propertyName, String environmentName, boolean defaultValue) {
     String value = getString(propertyName, environmentName, String.valueOf(defaultValue));
+    return parseBoolean(value);
+  }
+
+  private static boolean parseBoolean(String value) {
     return "true".equalsIgnoreCase(value) || "1".equals(value) || "yes".equalsIgnoreCase(value);
   }
 
@@ -189,11 +214,16 @@ public class JenkinsBridgeSettings {
     return result;
   }
 
-  private static String nullToEmpty(String value) {
+  static String nullToEmpty(String value) {
     return value == null ? "" : value;
   }
 
-  private static boolean isNotBlank(String value) {
+  private static String redact(String value) {
+    return isNotBlank(value) ? "<set>" : "<empty>";
+  }
+
+  static boolean isNotBlank(String value) {
     return value != null && value.trim().length() > 0;
   }
+
 }

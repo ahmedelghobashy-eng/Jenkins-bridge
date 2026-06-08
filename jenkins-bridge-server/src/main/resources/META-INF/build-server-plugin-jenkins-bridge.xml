@@ -3,9 +3,8 @@
        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
        xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd"
        default-autowire="constructor">
-  <bean id="jenkinsBridgeSettings"
-        class="com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettings"
-        factory-method="fromEnvironment"/>
+  <bean id="jenkinsBridgeSettingsProvider"
+        class="com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettingsProvider"/>
 
   <bean id="jenkinsBridgeHttpClient"
         class="com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpClient"/>
@@ -23,7 +22,9 @@
         class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildMirrorService"/>
 
   <bean id="jenkinsBridgePollingService"
-        class="com.jetbrains.teamcity.jenkinsbridge.polling.JenkinsBridgePollingService"
-        init-method="start"
-        destroy-method="stop"/>
+        class="com.jetbrains.teamcity.jenkinsbridge.polling.JenkinsBridgePollingService"/>
+
+  <bean id="jenkinsBridgeServerLifecycle"
+        class="com.jetbrains.teamcity.jenkinsbridge.polling.JenkinsBridgeServerLifecycle"
+        destroy-method="dispose"/>
 </beans>

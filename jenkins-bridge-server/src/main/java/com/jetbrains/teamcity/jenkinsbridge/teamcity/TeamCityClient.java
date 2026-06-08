@@ -8,6 +8,7 @@ import com.google.gson.JsonParser;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpClient;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpException;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettings;
+import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettingsProvider;
 
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
@@ -18,18 +19,19 @@ public class TeamCityClient {
   private static final String TEXT_PLAIN = "text/plain";
   private static final String AGENTLESS_BUILD_PROPERTY = "teamcity.build.agentLess";
 
-  private final JenkinsBridgeSettings settings;
+  private final JenkinsBridgeSettingsProvider settingsProvider;
   private final BridgeHttpClient httpClient;
   private final Gson gson = new Gson();
 
-  public TeamCityClient(JenkinsBridgeSettings settings, BridgeHttpClient httpClient) {
-    this.settings = settings;
+  public TeamCityClient(JenkinsBridgeSettingsProvider settingsProvider, BridgeHttpClient httpClient) {
+    this.settingsProvider = settingsProvider;
     this.httpClient = httpClient;
   }
 
   public Long findBuildIdByJenkinsBuildKey(String jenkinsBuildKey) throws BridgeHttpException {
+    JenkinsBridgeSettings settings = settingsProvider.load();
     String locator = "property:(name:jenkins.build.key,value:" + jenkinsBuildKey + "),count:1,defaultFilter:false";
-    String url = teamCityApi("/builds?locator=" + encodeQueryValue(locator)
+    String url = teamCityApi(settings, "/builds?locator=" + encodeQueryValue(locator)
         + "&fields=" + encodeQueryValue("build(id)"));
 
     String response = httpClient.get(
@@ -54,6 +56,7 @@ public class TeamCityClient {
   }
 
   public long queueAgentlessBuild(String buildTypeId, Map<String, String> properties) throws BridgeHttpException {
+    JenkinsBridgeSettings settings = settingsProvider.load();
     JsonObject payload = new JsonObject();
     JsonObject buildType = new JsonObject();
     buildType.addProperty("id", buildTypeId);
@@ -70,7 +73,7 @@ public class TeamCityClient {
     payload.add("properties", propertiesWrapper);
 
     String response = httpClient.post(
-        teamCityApi("/buildQueue"),
+        teamCityApi(settings, "/buildQueue"),
         settings.getTeamCityUser(),
         settings.getTeamCityPassword(),
         gson.toJson(payload),
@@ -82,8 +85,9 @@ public class TeamCityClient {
   }
 
   public void markBuildAsRunning(long buildId, String requestor) throws BridgeHttpException {
+    JenkinsBridgeSettings settings = settingsProvider.load();
     httpClient.put(
-        teamCityApi("/builds/id:" + buildId + "/runningData"),
+        teamCityApi(settings, "/builds/id:" + buildId + "/runningData"),
         settings.getTeamCityUser(),
         settings.getTeamCityPassword(),
         requestor,
@@ -97,8 +101,9 @@ public class TeamCityClient {
       return;
     }
 
+    JenkinsBridgeSettings settings = settingsProvider.load();
     httpClient.post(
-        teamCityApi("/builds/id:" + buildId + "/log"),
+        teamCityApi(settings, "/builds/id:" + buildId + "/log"),
         settings.getTeamCityUser(),
         settings.getTeamCityPassword(),
         text,
@@ -108,8 +113,9 @@ public class TeamCityClient {
   }
 
   public void setBuildFinishDate(long buildId, String finishDate) throws BridgeHttpException {
+    JenkinsBridgeSettings settings = settingsProvider.load();
     httpClient.put(
-        teamCityApi("/builds/id:" + buildId + "/finishDate"),
+        teamCityApi(settings, "/builds/id:" + buildId + "/finishDate"),
         settings.getTeamCityUser(),
         settings.getTeamCityPassword(),
         finishDate,
@@ -118,7 +124,7 @@ public class TeamCityClient {
     );
   }
 
-  private String teamCityApi(String path) {
+  private String teamCityApi(JenkinsBridgeSettings settings, String path) {
     return settings.getTeamCityUrl() + "/app/rest" + path;
   }
 

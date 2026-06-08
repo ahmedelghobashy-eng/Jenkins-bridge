@@ -75,6 +75,36 @@
               </execution>
             </executions>
         </plugin>
+        <plugin>
+            <artifactId>maven-antrun-plugin</artifactId>
+            <version>3.1.0</version>
+            <executions>
+              <execution>
+                <id>archive-package</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>run</goal>
+                </goals>
+                <configuration>
+                  <target>
+                    <exec executable="git" outputproperty="git.short.sha" failonerror="false">
+                      <arg value="rev-parse"/>
+                      <arg value="--short"/>
+                      <arg value="HEAD"/>
+                    </exec>
+                    <condition property="archive.git.short.sha" value="${git.short.sha}" else="nogit">
+                      <isset property="git.short.sha"/>
+                    </condition>
+                    <copy
+                      file="${basedir}/../target/jenkins-bridge.zip"
+                      tofile="${basedir}/../target/jenkins-bridge-${maven.build.timestamp}-${archive.git.short.sha}.zip"
+                      overwrite="false"/>
+                    <echo message="Archived plugin package: ${basedir}/../target/jenkins-bridge-${maven.build.timestamp}-${archive.git.short.sha}.zip"/>
+                  </target>
+                </configuration>
+              </execution>
+            </executions>
+        </plugin>
     </plugins>
   </build>
 </project>

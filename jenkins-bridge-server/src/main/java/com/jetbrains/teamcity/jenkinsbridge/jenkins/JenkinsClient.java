@@ -8,6 +8,7 @@ import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpClient;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpException;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettings;
+import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettingsProvider;
 
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
@@ -15,16 +16,17 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class JenkinsClient {
-  private final JenkinsBridgeSettings settings;
+  private final JenkinsBridgeSettingsProvider settingsProvider;
   private final BridgeHttpClient httpClient;
   private final JsonParser jsonParser = new JsonParser();
 
-  public JenkinsClient(JenkinsBridgeSettings settings, BridgeHttpClient httpClient) {
-    this.settings = settings;
+  public JenkinsClient(JenkinsBridgeSettingsProvider settingsProvider, BridgeHttpClient httpClient) {
+    this.settingsProvider = settingsProvider;
     this.httpClient = httpClient;
   }
 
   public List<JenkinsBuildInfo> getRecentBuilds(String jobName, int limit) throws BridgeHttpException {
+    JenkinsBridgeSettings settings = settingsProvider.load();
     String tree = "builds[number,url,building,result,timestamp,duration]{0," + limit + "}";
     String url = settings.getJenkinsUrl()
         + jenkinsJobPath(jobName)
@@ -47,6 +49,7 @@ public class JenkinsClient {
   }
 
   public JenkinsBuildInfo getBuildInfo(String jobName, int buildNumber) throws BridgeHttpException {
+    JenkinsBridgeSettings settings = settingsProvider.load();
     String tree = "number,building,result,timestamp,duration,estimatedDuration,url";
     String url = settings.getJenkinsUrl()
         + jenkinsJobPath(jobName)
@@ -60,6 +63,7 @@ public class JenkinsClient {
   }
 
   public String getConsoleText(String jobName, int buildNumber) throws BridgeHttpException {
+    JenkinsBridgeSettings settings = settingsProvider.load();
     String url = settings.getJenkinsUrl()
         + jenkinsJobPath(jobName)
         + "/"

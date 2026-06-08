@@ -8,8 +8,19 @@
 
  1. Configure
 
- The first MVP reads configuration from Java system properties first, then
- environment variables, then local defaults:
+ The current MVP reads configuration from TeamCity parameters first, then Java
+ system properties, then environment variables, then local defaults.
+
+ The plugin first reads jenkins.bridge.teamCityBuildTypeId from the root project
+ parameters, system properties, environment variables, or the local default.
+ After it finds that build configuration, the rest of the settings are read in
+ this order:
+
+ 1. Target build configuration parameter
+ 2. Root project parameter
+ 3. Java system property
+ 4. Environment variable
+ 5. Local default
 
  jenkins.bridge.enabled / JENKINS_BRIDGE_ENABLED
  jenkins.bridge.jenkinsUrl / JENKINS_URL
@@ -24,6 +35,9 @@
  jenkins.bridge.recentBuildLimit / RECENT_BUILDS_LIMIT
  jenkins.bridge.timeZone / TIMEZONE
  jenkins.bridge.stateFile / BRIDGE_STATE_FILE
+
+ If a TeamCity parameter value references another parameter, such as
+ %another.param%, the plugin resolves it through TeamCity's value resolver.
 
  Local defaults match the Python prototype:
 
@@ -43,7 +57,17 @@
  <TEAMCITY_DATA_PATH>/system/pluginData/jenkins-bridge/jenkins-teamcity-mapping.json
 
  2. Build
- Issue 'mvn package' command from the root project to build your plugin. Resulting package <artifactId>.zip will be placed in 'target' directory. 
+ Issue this command from the root project to build your plugin against the local
+ TeamCity EAP Maven artifacts:
+
+ mvn -Plocal-teamcity-eap -Dteamcity-version=2026.2-SNAPSHOT package
+
+ Plain 'mvn package' currently tries to resolve TeamCity 2026.2 release
+ artifacts, which are not available in the configured repositories yet.
+
+ The latest package is written to 'target/jenkins-bridge.zip'. The build also
+ keeps a timestamped Git-SHA archive copy in the target directory, for example
+ 'target/jenkins-bridge-20260608123456-2d8bab4.zip'.
  
  3. Install
  To install the plugin, put zip archive to 'plugins' dir under TeamCity data directory and restart the server.
