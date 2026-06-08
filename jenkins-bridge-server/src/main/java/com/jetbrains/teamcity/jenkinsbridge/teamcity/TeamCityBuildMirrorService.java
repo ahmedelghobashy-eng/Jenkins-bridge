@@ -27,15 +27,18 @@ public class TeamCityBuildMirrorService {
 
   private final JenkinsBridgeSettingsProvider settingsProvider;
   private final TeamCityClient teamCityClient;
+  private final TeamCityBuildFinisher teamCityBuildFinisher;
   private final JenkinsBuildMappingStore mappingStore;
 
   public TeamCityBuildMirrorService(
       JenkinsBridgeSettingsProvider settingsProvider,
       TeamCityClient teamCityClient,
+      TeamCityBuildFinisher teamCityBuildFinisher,
       JenkinsBuildMappingStore mappingStore
   ) {
     this.settingsProvider = settingsProvider;
     this.teamCityClient = teamCityClient;
+    this.teamCityBuildFinisher = teamCityBuildFinisher;
     this.mappingStore = mappingStore;
   }
 
@@ -152,9 +155,10 @@ public class TeamCityBuildMirrorService {
       mappingStore.saveMapping(mapping);
     }
 
-    String finishDate = formatTeamCityFinishDate(jenkinsInfo);
+    Date finishTime = getJenkinsFinishTime(jenkinsInfo);
+    String finishDate = formatTeamCityFinishDate(finishTime);
 
-    teamCityClient.setBuildFinishDate(teamCityBuildId, finishDate);
+    teamCityBuildFinisher.finishBuild(teamCityBuildId, finishTime);
 
     mapping.setState(JenkinsBuildState.TEAMCITY_FINISHED);
     mapping.setJenkinsResult(finalResult);
@@ -163,11 +167,15 @@ public class TeamCityBuildMirrorService {
     mappingStore.saveMapping(mapping);
   }
 
-  private String formatTeamCityFinishDate(JenkinsBuildInfo jenkinsInfo) {
+  private Date getJenkinsFinishTime(JenkinsBuildInfo jenkinsInfo) {
     long finishMillis = jenkinsInfo.getTimestamp() + Math.max(0L, jenkinsInfo.getDuration());
+    return new Date(finishMillis);
+  }
+
+  private String formatTeamCityFinishDate(Date finishTime) {
     SimpleDateFormat formatter = new SimpleDateFormat("yyyyMMdd'T'HHmmssZ");
     formatter.setTimeZone(TimeZone.getTimeZone(settingsProvider.load().getZoneId()));
-    return formatter.format(new Date(finishMillis));
+    return formatter.format(finishTime);
   }
 
   private String nullToEmpty(String value) {

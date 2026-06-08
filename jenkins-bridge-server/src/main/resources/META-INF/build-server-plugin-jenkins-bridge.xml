@@ -15,6 +15,9 @@
   <bean id="teamCityClient"
         class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityClient"/>
 
+  <bean id="teamCityBuildFinisher"
+        class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildFinisher"/>
+
   <bean id="jenkinsBuildMappingStore"
         class="com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildMappingStore"/>
 
