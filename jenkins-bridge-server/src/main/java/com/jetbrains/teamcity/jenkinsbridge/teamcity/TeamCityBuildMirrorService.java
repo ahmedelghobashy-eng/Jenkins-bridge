@@ -193,7 +193,7 @@ public class TeamCityBuildMirrorService {
     Date finishTime = getJenkinsFinishTime(jenkinsInfo);
     String finishDate = formatTeamCityFinishDate(finishTime);
 
-    teamCityBuildFinisher.finishBuild(teamCityBuildId, finishTime);
+    teamCityBuildFinisher.finishBuild(teamCityBuildId, finishTime, finalResult);
 
     mapping.setState(JenkinsBuildState.TEAMCITY_FINISHED);
     mapping.setJenkinsResult(finalResult);
