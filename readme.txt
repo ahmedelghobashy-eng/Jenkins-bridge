@@ -57,13 +57,20 @@
  <TEAMCITY_DATA_PATH>/system/pluginData/jenkins-bridge/jenkins-teamcity-mapping.json
 
  2. Build
- Issue this command from the root project to build your plugin against the local
- TeamCity EAP Maven artifacts:
+ Issue this command from the root project:
 
- mvn -Plocal-teamcity-eap -Dteamcity-version=2026.2-SNAPSHOT package
+ mvn package
 
- Plain 'mvn package' currently tries to resolve TeamCity 2026.2 release
- artifacts, which are not available in the configured repositories yet.
+ This builds against the local TeamCity EAP Maven artifacts (TeamCity
+ 2026.2-SNAPSHOT). The build no longer needs explicit flags: teamcity-version
+ defaults to 2026.2-SNAPSHOT, and the 'local-teamcity-eap' profile is active by
+ default so the local EAP repository is always on the classpath. The older
+ 'mvn -Plocal-teamcity-eap -Dteamcity-version=2026.2-SNAPSHOT package' command
+ still works and is now equivalent.
+
+ The TeamCity 2026.2-SNAPSHOT artifacts must be present in the local EAP repo
+ at '${user.home}/.m2/repository/TeamCity'. They are internal EAP artifacts and
+ are not published to the public JetBrains repository.
 
  The latest package is written to 'target/jenkins-bridge.zip'. The build also
  keeps a timestamped Git-SHA archive copy in the target directory, for example
