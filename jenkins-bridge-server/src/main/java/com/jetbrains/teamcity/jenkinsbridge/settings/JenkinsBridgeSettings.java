@@ -50,6 +50,7 @@ public class JenkinsBridgeSettings {
     this.stateFile = nullToEmpty(stateFile);
   }
 
+  @Deprecated
   public static JenkinsBridgeSettings fromEnvironment() {
     return new JenkinsBridgeSettings(
         getBoolean("jenkins.bridge.enabled", "JENKINS_BRIDGE_ENABLED", true),

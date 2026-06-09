@@ -5,6 +5,7 @@ import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildMapping;
 import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildMappingStore;
 import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildState;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsTestReport;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettings;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettingsProvider;
 
@@ -30,6 +31,7 @@ public class TeamCityBuildMirrorService {
   private final TeamCityBuildQueuer teamCityBuildQueuer;
   private final TeamCityBuildStarter teamCityBuildStarter;
   private final TeamCityBuildLogger teamCityBuildLogger;
+  private final TeamCityTestReporter teamCityTestReporter;
   private final TeamCityBuildFinisher teamCityBuildFinisher;
   private final JenkinsBuildMappingStore mappingStore;
 
@@ -39,6 +41,7 @@ public class TeamCityBuildMirrorService {
       TeamCityBuildQueuer teamCityBuildQueuer,
       TeamCityBuildStarter teamCityBuildStarter,
       TeamCityBuildLogger teamCityBuildLogger,
+      TeamCityTestReporter teamCityTestReporter,
       TeamCityBuildFinisher teamCityBuildFinisher,
       JenkinsBuildMappingStore mappingStore
   ) {
@@ -47,10 +50,13 @@ public class TeamCityBuildMirrorService {
     this.teamCityBuildQueuer = teamCityBuildQueuer;
     this.teamCityBuildStarter = teamCityBuildStarter;
     this.teamCityBuildLogger = teamCityBuildLogger;
+    this.teamCityTestReporter = teamCityTestReporter;
     this.teamCityBuildFinisher = teamCityBuildFinisher;
     this.mappingStore = mappingStore;
   }
 
+
+  // May need better naming
   public long ensureTeamCityBuild(JenkinsBuildMapping mapping, JenkinsBuildInfo jenkinsInfo)
       throws BridgeHttpException, IOException {
     if (mapping.getTeamCityBuildId() != null) {
@@ -58,6 +64,9 @@ public class TeamCityBuildMirrorService {
     }
 
     Long restoredBuildId = teamCityClient.findBuildIdByJenkinsBuildKey(mapping.getJenkinsBuildKey());
+
+    // If there already exists a build with the same Jenkins build key, use it
+
     if (restoredBuildId != null) {
       mapping.setTeamCityBuildId(restoredBuildId);
       mapping.setState(JenkinsBuildState.TEAMCITY_CREATED);
@@ -66,6 +75,10 @@ public class TeamCityBuildMirrorService {
       return restoredBuildId;
     }
 
+    // Else create a new build (with the build queuer) and return the build ID
+
+
+    // Prepare the build properties
     Map<String, String> properties = new LinkedHashMap<String, String>();
     properties.put("jenkins.job", mapping.getJenkinsJob());
     properties.put("jenkins.build.number", String.valueOf(mapping.getJenkinsBuildNumber()));
@@ -132,6 +145,19 @@ public class TeamCityBuildMirrorService {
 
     mapping.setLastLogOffset(consoleText.length());
     mapping.setState(JenkinsBuildState.LOG_SYNCING);
+    mapping.setLastError(null);
+    mappingStore.saveMapping(mapping);
+  }
+
+  public void syncTestsIfNeeded(JenkinsBuildMapping mapping, long teamCityBuildId, JenkinsTestReport testReport)
+      throws IOException {
+    if (mapping.isTestsSynced()) {
+      return;
+    }
+
+    teamCityTestReporter.reportTests(teamCityBuildId, testReport);
+
+    mapping.setTestsSynced(true);
     mapping.setLastError(null);
     mappingStore.saveMapping(mapping);
   }

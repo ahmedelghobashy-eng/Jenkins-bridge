@@ -3,7 +3,9 @@ package com.jetbrains.teamcity.jenkinsbridge.polling;
 import com.jetbrains.teamcity.jenkinsbridge.jenkins.JenkinsClient;
 import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildMapping;
 import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildMappingStore;
+import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildState;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsTestReport;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettings;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettingsProvider;
 import com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildMirrorService;
@@ -136,6 +138,14 @@ public class JenkinsBridgePollingService {
         + " console character(s) for " + mapping.getJenkinsBuildKey()
         + "; previous offset " + mapping.getLastLogOffset());
     mirrorService.syncLogs(mapping, teamCityBuildId, consoleText);
+    if (!buildInfo.isBuilding()
+        && !mapping.isTestsSynced()
+        && !JenkinsBuildState.TEAMCITY_FINISHED.equals(mapping.getState())) {
+      JenkinsTestReport testReport = jenkinsClient.getTestReport(mapping.getJenkinsJob(), mapping.getJenkinsBuildNumber());
+      LOG.info("[Jenkins Bridge DEBUG] Read " + testReport.getTestCount()
+          + " Jenkins test(s) for " + mapping.getJenkinsBuildKey());
+      mirrorService.syncTestsIfNeeded(mapping, teamCityBuildId, testReport);
+    }
     mirrorService.finishBuildIfNeeded(mapping, teamCityBuildId, buildInfo);
   }
 }

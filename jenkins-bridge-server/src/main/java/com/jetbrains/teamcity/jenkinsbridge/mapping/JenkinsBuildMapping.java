@@ -13,6 +13,7 @@ public class JenkinsBuildMapping {
   private int lastLogOffset;
   private boolean metadataLogSent;
   private boolean summaryLogSent;
+  private boolean testsSynced;
   private String jenkinsResult;
   private String teamCityFinishDate;
   private String lastError;
@@ -36,6 +37,7 @@ public class JenkinsBuildMapping {
     mapping.lastLogOffset = 0;
     mapping.metadataLogSent = false;
     mapping.summaryLogSent = false;
+    mapping.testsSynced = false;
     mapping.createdAt = now;
     mapping.updatedAt = now;
     return mapping;
@@ -107,6 +109,14 @@ public class JenkinsBuildMapping {
 
   public void setSummaryLogSent(boolean summaryLogSent) {
     this.summaryLogSent = summaryLogSent;
+  }
+
+  public boolean isTestsSynced() {
+    return testsSynced;
+  }
+
+  public void setTestsSynced(boolean testsSynced) {
+    this.testsSynced = testsSynced;
   }
 
   public String getJenkinsResult() {

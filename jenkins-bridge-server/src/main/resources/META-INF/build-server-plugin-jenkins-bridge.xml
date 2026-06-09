@@ -24,6 +24,9 @@
   <bean id="teamCityBuildLogger"
         class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildLogger"/>
 
+  <bean id="teamCityTestReporter"
+        class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityTestReporter"/>
+
   <bean id="teamCityBuildFinisher"
         class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildFinisher"/>
 

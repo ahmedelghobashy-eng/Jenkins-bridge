@@ -7,6 +7,7 @@ import com.google.gson.JsonParser;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpClient;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpException;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsTestReport;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettings;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettingsProvider;
 
@@ -71,6 +72,27 @@ public class JenkinsClient {
         + "/consoleText";
 
     return httpClient.get(url, settings.getJenkinsUser(), settings.getJenkinsToken(), "text/plain");
+  }
+
+  public JenkinsTestReport getTestReport(String jobName, int buildNumber) throws BridgeHttpException {
+    JenkinsBridgeSettings settings = settingsProvider.load();
+    String tree = "suites[name,cases[className,name,status,duration,errorDetails,errorStackTrace,skippedMessage,stdout,stderr]]";
+    String url = settings.getJenkinsUrl()
+        + jenkinsJobPath(jobName)
+        + "/"
+        + buildNumber
+        + "/testReport/api/json?tree="
+        + encodeQueryValue(tree);
+
+    try {
+      String response = httpClient.get(url, settings.getJenkinsUser(), settings.getJenkinsToken(), "application/json");
+      return JenkinsTestReport.fromJson(jsonParser.parse(response).getAsJsonObject());
+    } catch (BridgeHttpException e) {
+      if (e.getStatusCode() == 404) {
+        return JenkinsTestReport.empty();
+      }
+      throw e;
+    }
   }
 
   private String jenkinsJobPath(String jobName) {

@@ -28,6 +28,8 @@ public class TeamCityClient {
     this.httpClient = httpClient;
   }
 
+
+  // Returns Null if no builds found
   public Long findBuildIdByJenkinsBuildKey(String jenkinsBuildKey) throws BridgeHttpException {
     JenkinsBridgeSettings settings = settingsProvider.load();
     String locator = "property:(name:jenkins.build.key,value:" + jenkinsBuildKey + "),count:1,defaultFilter:false";
