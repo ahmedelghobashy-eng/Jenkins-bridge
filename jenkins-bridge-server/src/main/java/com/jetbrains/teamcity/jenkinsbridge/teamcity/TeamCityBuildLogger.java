@@ -1,5 +1,6 @@
 package com.jetbrains.teamcity.jenkinsbridge.teamcity;
 
+import jetbrains.buildServer.messages.BuildMessage1;
 import jetbrains.buildServer.messages.DefaultMessagesInfo;
 import jetbrains.buildServer.serverSide.BuildPromotion;
 import jetbrains.buildServer.serverSide.BuildPromotionManager;
@@ -9,7 +10,9 @@ import jetbrains.buildServer.serverSide.SBuild;
 import jetbrains.buildServer.serverSide.SRunningBuild;
 import jetbrains.buildServer.serverSide.impl.BuildAgentMessagesQueue;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 
 public class TeamCityBuildLogger {
   private final BuildsManager buildsManager;
@@ -37,10 +40,15 @@ public class TeamCityBuildLogger {
     }
 
     try {
-      buildAgentMessagesQueue.processMessages(
-          runningBuild,
-          Collections.singletonList(DefaultMessagesInfo.createTextMessage(text).updateTags(DefaultMessagesInfo.TAG_SERVER))
-      );
+      // Split by lines to avoid giant messages (P6 in RELIABILITY_AND_PERFORMANCE.md)
+      // This also ensures that very large deltas don't exceed TeamCity's message size limits or cause heap pressure.
+      String[] lines = text.split("(\r\n|\n|\r)", -1);
+      List<BuildMessage1> messages = new ArrayList<>(lines.length);
+      for (String line : lines) {
+        messages.add(DefaultMessagesInfo.createTextMessage(line).updateTags(DefaultMessagesInfo.TAG_SERVER));
+      }
+
+      buildAgentMessagesQueue.processMessages(runningBuild, messages);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       throw new IllegalStateException("Interrupted while logging TeamCity build message", e);
