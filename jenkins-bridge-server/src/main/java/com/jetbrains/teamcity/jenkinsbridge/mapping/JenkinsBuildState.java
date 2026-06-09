@@ -1,5 +1,6 @@
 package com.jetbrains.teamcity.jenkinsbridge.mapping;
 
+//TODO this naming is really confusing, needs to be changed.
 public final class JenkinsBuildState {
   public static final String DISCOVERED = "DISCOVERED";
   public static final String TEAMCITY_CREATED = "TEAMCITY_CREATED";

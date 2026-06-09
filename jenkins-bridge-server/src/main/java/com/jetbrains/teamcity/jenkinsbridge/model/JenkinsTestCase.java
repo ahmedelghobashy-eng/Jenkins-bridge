@@ -9,6 +9,7 @@ public class JenkinsTestCase {
 
   private String className;
   private String name;
+  // TODO should probably be an enum, and cast to that enum during the construciton. This is currently confusing
   private String status;
   private int durationMillis;
   private String errorDetails;

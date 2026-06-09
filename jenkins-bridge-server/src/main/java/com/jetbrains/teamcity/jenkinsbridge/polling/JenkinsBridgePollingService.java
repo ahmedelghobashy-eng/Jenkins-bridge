@@ -102,6 +102,8 @@ public class JenkinsBridgePollingService {
       throw new IllegalStateException(settings.describeMinimumConfigurationProblem());
     }
 
+    // TODO for this POC we just poll the recent builds within a certain limit,
+    // We should consider polling since the last build number we polled.
     List<JenkinsBuildInfo> recentBuilds = jenkinsClient.getRecentBuilds(
         settings.getJenkinsJob(),
         settings.getRecentBuildLimit()
@@ -146,6 +148,8 @@ public class JenkinsBridgePollingService {
           + " Jenkins test(s) for " + mapping.getJenkinsBuildKey());
       mirrorService.syncTestsIfNeeded(mapping, teamCityBuildId, testReport);
     }
+
+    // I think here I should have a sync status if needed..
     mirrorService.finishBuildIfNeeded(mapping, teamCityBuildId, buildInfo);
   }
 }
