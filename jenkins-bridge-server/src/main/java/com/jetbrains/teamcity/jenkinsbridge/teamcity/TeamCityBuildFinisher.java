@@ -3,10 +3,7 @@ package com.jetbrains.teamcity.jenkinsbridge.teamcity;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsVerdict;
 import jetbrains.buildServer.BuildProblemData;
 import jetbrains.buildServer.messages.DefaultMessagesInfo;
-import jetbrains.buildServer.serverSide.BuildsManager;
 import jetbrains.buildServer.serverSide.RunningBuildEx;
-import jetbrains.buildServer.serverSide.SBuild;
-import jetbrains.buildServer.serverSide.SRunningBuild;
 import jetbrains.buildServer.serverSide.impl.BuildAgentMessagesQueue;
 import jetbrains.buildServer.serverSide.impl.RunningBuildState;
 
@@ -18,39 +15,24 @@ public class TeamCityBuildFinisher {
   // Build problem type shared by all Jenkins-result problems; the per-result identity is appended below.
   private static final String JENKINS_RESULT_PROBLEM_TYPE = "jenkinsBuildResult";
 
-  private final BuildsManager buildsManager;
+  private final TeamCityRunningBuildLocator buildLocator;
   private final BuildAgentMessagesQueue buildAgentMessagesQueue;
 
   public TeamCityBuildFinisher(
-      BuildsManager buildsManager,
+      TeamCityRunningBuildLocator buildLocator,
       BuildAgentMessagesQueue buildAgentMessagesQueue
   ) {
-    this.buildsManager = buildsManager;
+    this.buildLocator = buildLocator;
     this.buildAgentMessagesQueue = buildAgentMessagesQueue;
   }
 
   public void finishBuild(long buildId, Date finishTime, String jenkinsResult) {
-    SRunningBuild runningBuild = buildsManager.findRunningBuildById(buildId);
-    if (runningBuild instanceof RunningBuildEx) {
-      finishRunningBuild((RunningBuildEx)runningBuild, finishTime, jenkinsResult);
+    RunningBuildEx runningBuild = buildLocator.findRunningBuild(buildId);
+    if (runningBuild == null) {
+      // Build is not in a runnable state (e.g. already finished) — nothing to finish.
       return;
     }
-
-    SBuild build = buildsManager.findBuildInstanceById(buildId);
-    if (build == null) {
-      throw new IllegalStateException("TeamCity build " + buildId + " was not found");
-    }
-
-    if (build.isFinished()) {
-      return;
-    }
-
-    if (build instanceof RunningBuildEx) {
-      finishRunningBuild((RunningBuildEx)build, finishTime, jenkinsResult);
-      return;
-    }
-
-    throw new IllegalStateException("TeamCity build " + buildId + " is not a running build");
+    finishRunningBuild(runningBuild, finishTime, jenkinsResult);
   }
 
   private void finishRunningBuild(RunningBuildEx runningBuild, Date finishTime, String jenkinsResult) {

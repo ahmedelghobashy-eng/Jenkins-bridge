@@ -135,6 +135,7 @@ public class JenkinsBridgePollingService {
     }
 
     // Process every build strictly after the watermark, oldest first.
+    // TODO caveat : the builds in Jenkins restart after a certain limit. This has to be considered.
     List<Integer> toProcess = new ArrayList<Integer>();
     for (Integer number : numbers) {
       if (number > lastSeen) {

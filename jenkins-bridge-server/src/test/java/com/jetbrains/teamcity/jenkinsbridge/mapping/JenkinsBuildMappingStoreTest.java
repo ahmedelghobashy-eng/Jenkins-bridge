@@ -8,11 +8,14 @@ import org.junit.Test;
 
 import java.io.File;
 import java.lang.reflect.Constructor;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 public class JenkinsBuildMappingStoreTest {
   @Test
@@ -56,6 +59,29 @@ public class JenkinsBuildMappingStoreTest {
     assertNull(store.findMapping(JenkinsBuildMappingStore.buildKey("job", 999)));
   }
 
+  @Test
+  public void corruptStateFileIsQuarantinedAndBridgeStartsFresh() throws Exception {
+    File stateFile = File.createTempFile("jenkins-bridge-store-test", ".json");
+    stateFile.deleteOnExit();
+    Files.write(stateFile.toPath(), "@@@ definitely not json @@@".getBytes(StandardCharsets.UTF_8));
+
+    JenkinsBuildMappingStore store =
+        new JenkinsBuildMappingStore(null, providerForStateFile(stateFile.getAbsolutePath()));
+
+    // Must not throw, and must start from empty state.
+    assertEquals(0, store.getLastSeenBuildNumber("job"));
+    assertNull(store.findMapping(JenkinsBuildMappingStore.buildKey("job", 1)));
+
+    // The corrupt file is moved aside to a .corrupt-* sibling rather than left to brick every poll.
+    File[] quarantined = stateFile.getParentFile()
+        .listFiles((dir, name) -> name.startsWith(stateFile.getName() + ".corrupt-"));
+    assertNotNull(quarantined);
+    assertTrue("expected a quarantined .corrupt-* file", quarantined.length >= 1);
+    for (File f : quarantined) {
+      f.deleteOnExit();
+    }
+  }
+
   private static JenkinsBuildInfo buildInfo(int number) {
     JsonObject json = new JsonObject();
     json.addProperty("number", number);
@@ -67,8 +93,10 @@ public class JenkinsBuildMappingStoreTest {
     File stateFile = File.createTempFile("jenkins-bridge-store-test", ".json");
     stateFile.delete();
     stateFile.deleteOnExit();
-    final String path = stateFile.getAbsolutePath();
+    return providerForStateFile(stateFile.getAbsolutePath());
+  }
 
+  private static JenkinsBridgeSettingsProvider providerForStateFile(final String path) {
     return new JenkinsBridgeSettingsProvider(null) {
       @Override
       public JenkinsBridgeSettings load() {

@@ -35,7 +35,7 @@ public class TeamCityTestReporterTest {
         + "}]"
         + "}").getAsJsonObject());
 
-    TeamCityTestReporter reporter = new TeamCityTestReporter(null, null, null);
+    TeamCityTestReporter reporter = new TeamCityTestReporter(null, null);
     List<BuildMessage1> messages = reporter.createTestMessages(report);
 
     assertEquals(12, messages.size());

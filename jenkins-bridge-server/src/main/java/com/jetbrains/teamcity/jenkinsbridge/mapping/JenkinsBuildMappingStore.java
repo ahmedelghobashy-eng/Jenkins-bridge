@@ -167,13 +167,27 @@ public class JenkinsBuildMappingStore {
       return;
     }
 
+    JsonParseException parseError = null;
     Reader reader = Files.newBufferedReader(stateFile, StandardCharsets.UTF_8);
     try {
       state = gson.fromJson(reader, BridgeState.class);
     } catch (JsonParseException e) {
-      throw new IOException("Failed to parse Jenkins Bridge state file " + stateFile, e);
+      parseError = e;
     } finally {
       reader.close();
+    }
+
+    if (parseError != null) {
+      // A corrupt/truncated state file must not brick the bridge (R7). Move it aside and start
+      // fresh; mappings re-bind to existing TeamCity builds via restore-by-key on the next sync.
+      LOG.log(Level.WARNING,
+          "Jenkins Bridge state file " + stateFile + " is corrupt; quarantining it and starting with empty state",
+          parseError);
+      quarantineCorruptStateFile(stateFile);
+      state = new BridgeState();
+      state.setVersion(1);
+      loadedStateFile = stateFile;
+      return;
     }
 
     if (state == null) {
@@ -182,6 +196,17 @@ public class JenkinsBuildMappingStore {
     state.setVersion(1);
     state.getBuilds();
     loadedStateFile = stateFile;
+  }
+
+  private void quarantineCorruptStateFile(Path stateFile) {
+    Path target = stateFile.resolveSibling(
+        stateFile.getFileName().toString() + ".corrupt-" + System.currentTimeMillis());
+    try {
+      Files.move(stateFile, target);
+      LOG.warning("Moved corrupt Jenkins Bridge state file to " + target);
+    } catch (IOException moveError) {
+      LOG.log(Level.WARNING, "Failed to move corrupt Jenkins Bridge state file " + stateFile + " aside", moveError);
+    }
   }
 
   private void saveState() throws IOException {

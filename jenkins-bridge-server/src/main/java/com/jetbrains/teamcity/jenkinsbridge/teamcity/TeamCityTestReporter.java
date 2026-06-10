@@ -5,29 +5,21 @@ import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsTestReport;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsTestSuite;
 import jetbrains.buildServer.messages.BuildMessage1;
 import jetbrains.buildServer.messages.DefaultMessagesInfo;
-import jetbrains.buildServer.serverSide.BuildPromotion;
-import jetbrains.buildServer.serverSide.BuildPromotionManager;
-import jetbrains.buildServer.serverSide.BuildsManager;
 import jetbrains.buildServer.serverSide.RunningBuildEx;
-import jetbrains.buildServer.serverSide.SBuild;
-import jetbrains.buildServer.serverSide.SRunningBuild;
 import jetbrains.buildServer.serverSide.impl.BuildAgentMessagesQueue;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class TeamCityTestReporter {
-  private final BuildsManager buildsManager;
-  private final BuildPromotionManager buildPromotionManager;
+  private final TeamCityRunningBuildLocator buildLocator;
   private final BuildAgentMessagesQueue buildAgentMessagesQueue;
 
   public TeamCityTestReporter(
-      BuildsManager buildsManager,
-      BuildPromotionManager buildPromotionManager,
+      TeamCityRunningBuildLocator buildLocator,
       BuildAgentMessagesQueue buildAgentMessagesQueue
   ) {
-    this.buildsManager = buildsManager;
-    this.buildPromotionManager = buildPromotionManager;
+    this.buildLocator = buildLocator;
     this.buildAgentMessagesQueue = buildAgentMessagesQueue;
   }
 
@@ -36,7 +28,7 @@ public class TeamCityTestReporter {
       return;
     }
 
-    RunningBuildEx runningBuild = findRunningBuild(buildId);
+    RunningBuildEx runningBuild = buildLocator.findRunningBuild(buildId);
     if (runningBuild == null) {
       return;
     }
@@ -98,40 +90,5 @@ public class TeamCityTestReporter {
 
   private BuildMessage1 serverMessage(BuildMessage1 message) {
     return message.updateTags(DefaultMessagesInfo.TAG_SERVER);
-  }
-
-  private RunningBuildEx findRunningBuild(long buildId) {
-    SRunningBuild runningBuild = buildsManager.findRunningBuildById(buildId);
-    if (runningBuild instanceof RunningBuildEx) {
-      return (RunningBuildEx)runningBuild;
-    }
-
-    SBuild build = buildsManager.findBuildInstanceById(buildId);
-    if (build != null) {
-      if (build.isFinished()) {
-        return null;
-      }
-      if (build instanceof RunningBuildEx) {
-        return (RunningBuildEx)build;
-      }
-    }
-
-    BuildPromotion promotion = buildPromotionManager.findPromotionOrReplacement(buildId);
-    if (promotion == null) {
-      throw new IllegalStateException("TeamCity build " + buildId + " was not found");
-    }
-
-    SBuild associatedBuild = promotion.getAssociatedBuild();
-    if (associatedBuild == null) {
-      throw new IllegalStateException("TeamCity build " + buildId + " is not running");
-    }
-    if (associatedBuild.isFinished()) {
-      return null;
-    }
-    if (associatedBuild instanceof RunningBuildEx) {
-      return (RunningBuildEx)associatedBuild;
-    }
-
-    throw new IllegalStateException("TeamCity build " + buildId + " is not a running build");
   }
 }

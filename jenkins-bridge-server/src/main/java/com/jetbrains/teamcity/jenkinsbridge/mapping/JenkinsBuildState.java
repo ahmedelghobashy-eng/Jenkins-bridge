@@ -1,6 +1,6 @@
 package com.jetbrains.teamcity.jenkinsbridge.mapping;
 
-//TODO this naming is really confusing, needs to be changed.
+//TODO this naming is really confusing, needs to be changed. It is the state of syncing we have in the bridge not the name of the Jenkins build
 public final class JenkinsBuildState {
   public static final String DISCOVERED = "DISCOVERED";
   public static final String TEAMCITY_CREATED = "TEAMCITY_CREATED";

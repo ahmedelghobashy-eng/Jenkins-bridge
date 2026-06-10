@@ -15,6 +15,9 @@
   <bean id="teamCityClient"
         class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityClient"/>
 
+  <bean id="teamCityRunningBuildLocator"
+        class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityRunningBuildLocator"/>
+
   <bean id="teamCityBuildQueuer"
         class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildQueuer"/>
 

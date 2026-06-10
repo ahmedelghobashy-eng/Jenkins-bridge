@@ -6,6 +6,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -115,10 +116,32 @@ public class BridgeHttpClient {
       while ((read = stream.read(chunk)) != -1) {
         buffer.write(chunk, 0, read);
       }
-      return new String(buffer.toByteArray(), StandardCharsets.UTF_8);
+      return new String(buffer.toByteArray(), charsetFor(connection));
     } finally {
       stream.close();
     }
+  }
+
+  // Decode using the response's declared charset (e.g. Jenkins consoles that aren't UTF-8),
+  // falling back to UTF-8 when absent/unsupported.
+  private Charset charsetFor(HttpURLConnection connection) {
+    String contentType = connection.getContentType();
+    if (contentType != null) {
+      for (String part : contentType.split(";")) {
+        String trimmed = part.trim();
+        if (trimmed.regionMatches(true, 0, "charset=", 0, "charset=".length())) {
+          String name = trimmed.substring("charset=".length()).trim().replace("\"", "");
+          try {
+            if (name.length() > 0 && Charset.isSupported(name)) {
+              return Charset.forName(name);
+            }
+          } catch (RuntimeException ignored) {
+            // Illegal/unsupported charset name: fall back to UTF-8.
+          }
+        }
+      }
+    }
+    return StandardCharsets.UTF_8;
   }
 
   private boolean isNotBlank(String value) {
