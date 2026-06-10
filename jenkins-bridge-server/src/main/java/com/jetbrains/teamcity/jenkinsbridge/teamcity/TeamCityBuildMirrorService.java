@@ -1,9 +1,9 @@
 package com.jetbrains.teamcity.jenkinsbridge.teamcity;
 
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpException;
-import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildMapping;
-import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildMappingStore;
-import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildState;
+import com.jetbrains.teamcity.jenkinsbridge.persistence.BuildMirror;
+import com.jetbrains.teamcity.jenkinsbridge.persistence.BuildMirrorStore;
+import com.jetbrains.teamcity.jenkinsbridge.persistence.SyncState;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsLogChunk;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsTestReport;
@@ -12,20 +12,19 @@ import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettingsProvid
 
 import java.io.IOException;
 import java.text.SimpleDateFormat;
-import java.util.Arrays;
 import java.util.Date;
-import java.util.HashSet;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.TimeZone;
 
 public class TeamCityBuildMirrorService {
-  private static final Set<String> RUNNING_DATA_ALREADY_SENT_STATES = new HashSet<String>(Arrays.asList(
-      JenkinsBuildState.RUNNING_SENT,
-      JenkinsBuildState.LOG_SYNCING,
-      JenkinsBuildState.TEAMCITY_FINISHED
-  ));
+  private static final Set<SyncState> RUNNING_DATA_ALREADY_SENT_STATES = EnumSet.of(
+      SyncState.RUNNING_SENT,
+      SyncState.LOG_SYNCING,
+      SyncState.TEAMCITY_FINISHED
+  );
 
   private final JenkinsBridgeSettingsProvider settingsProvider;
   private final TeamCityClient teamCityClient;
@@ -34,7 +33,7 @@ public class TeamCityBuildMirrorService {
   private final TeamCityBuildLogger teamCityBuildLogger;
   private final TeamCityTestReporter teamCityTestReporter;
   private final TeamCityBuildFinisher teamCityBuildFinisher;
-  private final JenkinsBuildMappingStore mappingStore;
+  private final BuildMirrorStore mirrorStore;
 
   public TeamCityBuildMirrorService(
       JenkinsBridgeSettingsProvider settingsProvider,
@@ -44,7 +43,7 @@ public class TeamCityBuildMirrorService {
       TeamCityBuildLogger teamCityBuildLogger,
       TeamCityTestReporter teamCityTestReporter,
       TeamCityBuildFinisher teamCityBuildFinisher,
-      JenkinsBuildMappingStore mappingStore
+      BuildMirrorStore mirrorStore
   ) {
     this.settingsProvider = settingsProvider;
     this.teamCityClient = teamCityClient;
@@ -53,26 +52,26 @@ public class TeamCityBuildMirrorService {
     this.teamCityBuildLogger = teamCityBuildLogger;
     this.teamCityTestReporter = teamCityTestReporter;
     this.teamCityBuildFinisher = teamCityBuildFinisher;
-    this.mappingStore = mappingStore;
+    this.mirrorStore = mirrorStore;
   }
 
 
   // May need better naming
-  public long ensureTeamCityBuild(JenkinsBuildMapping mapping, JenkinsBuildInfo jenkinsInfo)
+  public long ensureTeamCityBuild(BuildMirror mirror, JenkinsBuildInfo jenkinsInfo)
       throws BridgeHttpException, IOException {
-    if (mapping.getTeamCityBuildId() != null) {
-      return mapping.getTeamCityBuildId();
+    if (mirror.getTeamCityBuildId() != null) {
+      return mirror.getTeamCityBuildId();
     }
 
-    Long restoredBuildId = teamCityClient.findBuildIdByJenkinsBuildKey(mapping.getJenkinsBuildKey());
+    Long restoredBuildId = teamCityClient.findBuildIdByJenkinsBuildKey(mirror.getJenkinsBuildKey());
 
     // If there already exists a build with the same Jenkins build key, use it
 
     if (restoredBuildId != null) {
-      mapping.setTeamCityBuildId(restoredBuildId);
-      mapping.setState(JenkinsBuildState.TEAMCITY_CREATED);
-      mapping.setLastError(null);
-      mappingStore.saveMapping(mapping);
+      mirror.setTeamCityBuildId(restoredBuildId);
+      mirror.setSyncState(SyncState.TEAMCITY_CREATED);
+      mirror.setLastError(null);
+      mirrorStore.saveMirror(mirror);
       return restoredBuildId;
     }
 
@@ -81,56 +80,56 @@ public class TeamCityBuildMirrorService {
 
     // Prepare the build properties
     Map<String, String> properties = new LinkedHashMap<String, String>();
-    properties.put("jenkins.job", mapping.getJenkinsJob());
-    properties.put("jenkins.build.number", String.valueOf(mapping.getJenkinsBuildNumber()));
-    properties.put("jenkins.build.key", mapping.getJenkinsBuildKey());
+    properties.put("jenkins.job", mirror.getJenkinsJob());
+    properties.put("jenkins.build.number", String.valueOf(mirror.getJenkinsBuildNumber()));
+    properties.put("jenkins.build.key", mirror.getJenkinsBuildKey());
     properties.put("jenkins.build.url", nullToEmpty(jenkinsInfo.getUrl()));
 
     long buildId = teamCityBuildQueuer.queueAgentlessBuild(settingsProvider.load().getTeamCityBuildTypeId(), properties);
-    mapping.setTeamCityBuildId(buildId);
-    mapping.setState(JenkinsBuildState.TEAMCITY_CREATED);
-    mapping.setLastError(null);
-    mappingStore.saveMapping(mapping);
+    mirror.setTeamCityBuildId(buildId);
+    mirror.setSyncState(SyncState.TEAMCITY_CREATED);
+    mirror.setLastError(null);
+    mirrorStore.saveMirror(mirror);
     return buildId;
   }
 
-  public void ensureRunningDataSent(JenkinsBuildMapping mapping, long teamCityBuildId)
+  public void ensureRunningDataSent(BuildMirror mirror, long teamCityBuildId)
       throws BridgeHttpException, IOException {
-    if (RUNNING_DATA_ALREADY_SENT_STATES.contains(mapping.getState())) {
+    if (RUNNING_DATA_ALREADY_SENT_STATES.contains(mirror.getSyncState())) {
       return;
     }
 
-    String text = "Monitoring Jenkins job " + mapping.getJenkinsJob()
-        + " build #" + mapping.getJenkinsBuildNumber();
+    String text = "Monitoring Jenkins job " + mirror.getJenkinsJob()
+        + " build #" + mirror.getJenkinsBuildNumber();
 
     teamCityBuildStarter.markBuildAsRunning(teamCityBuildId, text);
 
-    mapping.setState(JenkinsBuildState.RUNNING_SENT);
-    mapping.setLastError(null);
-    mappingStore.saveMapping(mapping);
+    mirror.setSyncState(SyncState.RUNNING_SENT);
+    mirror.setLastError(null);
+    mirrorStore.saveMirror(mirror);
   }
 
-  public void ensureMetadataLogSent(JenkinsBuildMapping mapping, long teamCityBuildId)
+  public void ensureMetadataLogSent(BuildMirror mirror, long teamCityBuildId)
       throws BridgeHttpException, IOException {
-    if (mapping.isMetadataLogSent()) {
+    if (mirror.isMetadataLogSent()) {
       return;
     }
 
-    String text = "Monitoring Jenkins job: " + mapping.getJenkinsJob() + "\n"
-        + "Jenkins build number: " + mapping.getJenkinsBuildNumber() + "\n"
-        + "Jenkins build key: " + mapping.getJenkinsBuildKey() + "\n"
-        + "Jenkins build URL: " + nullToEmpty(mapping.getJenkinsBuildUrl()) + "\n"
+    String text = "Monitoring Jenkins job: " + mirror.getJenkinsJob() + "\n"
+        + "Jenkins build number: " + mirror.getJenkinsBuildNumber() + "\n"
+        + "Jenkins build key: " + mirror.getJenkinsBuildKey() + "\n"
+        + "Jenkins build URL: " + nullToEmpty(mirror.getJenkinsBuildUrl()) + "\n"
         + "\n";
 
     teamCityBuildLogger.addBuildLog(teamCityBuildId, text);
 
-    mapping.setMetadataLogSent(true);
-    mapping.setState(JenkinsBuildState.LOG_SYNCING);
-    mapping.setLastError(null);
-    mappingStore.saveMapping(mapping);
+    mirror.setMetadataLogSent(true);
+    mirror.setSyncState(SyncState.LOG_SYNCING);
+    mirror.setLastError(null);
+    mirrorStore.saveMirror(mirror);
   }
 
-  public void syncLogs(JenkinsBuildMapping mapping, long teamCityBuildId, JenkinsLogChunk logChunk)
+  public void syncLogs(BuildMirror mirror, long teamCityBuildId, JenkinsLogChunk logChunk)
       throws BridgeHttpException, IOException {
     String newLog = logChunk.getText();
     if (newLog.length() == 0) {
@@ -140,28 +139,28 @@ public class TeamCityBuildMirrorService {
 
     teamCityBuildLogger.addBuildLog(teamCityBuildId, newLog);
 
-    mapping.setLastLogOffset(logChunk.getNextStart());
-    mapping.setState(JenkinsBuildState.LOG_SYNCING);
-    mapping.setLastError(null);
-    mappingStore.saveMapping(mapping);
+    mirror.setLastLogOffset(logChunk.getNextStart());
+    mirror.setSyncState(SyncState.LOG_SYNCING);
+    mirror.setLastError(null);
+    mirrorStore.saveMirror(mirror);
   }
 
-  public void syncTestsIfNeeded(JenkinsBuildMapping mapping, long teamCityBuildId, JenkinsTestReport testReport)
+  public void syncTestsIfNeeded(BuildMirror mirror, long teamCityBuildId, JenkinsTestReport testReport)
       throws IOException {
-    if (mapping.isTestsSynced()) {
+    if (mirror.isTestsSynced()) {
       return;
     }
 
     teamCityTestReporter.reportTests(teamCityBuildId, testReport);
 
-    mapping.setTestsSynced(true);
-    mapping.setLastError(null);
-    mappingStore.saveMapping(mapping);
+    mirror.setTestsSynced(true);
+    mirror.setLastError(null);
+    mirrorStore.saveMirror(mirror);
   }
 
-  public void finishBuildIfNeeded(JenkinsBuildMapping mapping, long teamCityBuildId, JenkinsBuildInfo jenkinsInfo)
+  public void finishBuildIfNeeded(BuildMirror mirror, long teamCityBuildId, JenkinsBuildInfo jenkinsInfo)
       throws BridgeHttpException, IOException {
-    if (JenkinsBuildState.TEAMCITY_FINISHED.equals(mapping.getState())) {
+    if (mirror.getSyncState() == SyncState.TEAMCITY_FINISHED) {
       return;
     }
 
@@ -170,21 +169,21 @@ public class TeamCityBuildMirrorService {
     }
 
     String finalResult = jenkinsInfo.getResult() == null ? "UNKNOWN" : jenkinsInfo.getResult();
-    if (!mapping.isSummaryLogSent()) {
+    if (!mirror.isSummaryLogSent()) {
       String summary = "\n--- Jenkins build summary ---\n"
-          + "Jenkins job: " + mapping.getJenkinsJob() + "\n"
-          + "Jenkins build number: " + mapping.getJenkinsBuildNumber() + "\n"
-          + "Jenkins build key: " + mapping.getJenkinsBuildKey() + "\n"
+          + "Jenkins job: " + mirror.getJenkinsJob() + "\n"
+          + "Jenkins build number: " + mirror.getJenkinsBuildNumber() + "\n"
+          + "Jenkins build key: " + mirror.getJenkinsBuildKey() + "\n"
           + "Jenkins URL: " + nullToEmpty(jenkinsInfo.getUrl()) + "\n"
           + "Jenkins result: " + finalResult + "\n"
           + "Jenkins duration: " + jenkinsInfo.getDuration() + " ms\n";
 
       teamCityBuildLogger.addBuildLog(teamCityBuildId, summary);
 
-      mapping.setSummaryLogSent(true);
-      mapping.setJenkinsResult(finalResult);
-      mapping.setLastError(null);
-      mappingStore.saveMapping(mapping);
+      mirror.setSummaryLogSent(true);
+      mirror.setJenkinsResult(finalResult);
+      mirror.setLastError(null);
+      mirrorStore.saveMirror(mirror);
     }
 
     Date finishTime = getJenkinsFinishTime(jenkinsInfo);
@@ -192,11 +191,11 @@ public class TeamCityBuildMirrorService {
 
     teamCityBuildFinisher.finishBuild(teamCityBuildId, finishTime, finalResult);
 
-    mapping.setState(JenkinsBuildState.TEAMCITY_FINISHED);
-    mapping.setJenkinsResult(finalResult);
-    mapping.setTeamCityFinishDate(finishDate);
-    mapping.setLastError(null);
-    mappingStore.saveMapping(mapping);
+    mirror.setSyncState(SyncState.TEAMCITY_FINISHED);
+    mirror.setJenkinsResult(finalResult);
+    mirror.setTeamCityFinishDate(finishDate);
+    mirror.setLastError(null);
+    mirrorStore.saveMirror(mirror);
   }
 
   private Date getJenkinsFinishTime(JenkinsBuildInfo jenkinsInfo) {

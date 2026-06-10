@@ -1,9 +1,9 @@
 package com.jetbrains.teamcity.jenkinsbridge.polling;
 
 import com.jetbrains.teamcity.jenkinsbridge.jenkins.JenkinsClient;
-import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildMapping;
-import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildMappingStore;
-import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildState;
+import com.jetbrains.teamcity.jenkinsbridge.persistence.BuildMirror;
+import com.jetbrains.teamcity.jenkinsbridge.persistence.BuildMirrorStore;
+import com.jetbrains.teamcity.jenkinsbridge.persistence.SyncState;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsLogChunk;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsTestReport;
@@ -30,7 +30,7 @@ public class JenkinsBridgePollingService {
   private final JenkinsBridgeSettingsProvider settingsProvider;
   private final JenkinsClient jenkinsClient;
   private final TeamCityBuildMirrorService mirrorService;
-  private final JenkinsBuildMappingStore mappingStore;
+  private final BuildMirrorStore mirrorStore;
   private final AtomicBoolean started = new AtomicBoolean(false);
   private ScheduledExecutorService executorService;
 
@@ -38,12 +38,12 @@ public class JenkinsBridgePollingService {
       JenkinsBridgeSettingsProvider settingsProvider,
       JenkinsClient jenkinsClient,
       TeamCityBuildMirrorService mirrorService,
-      JenkinsBuildMappingStore mappingStore
+      BuildMirrorStore mirrorStore
   ) {
     this.settingsProvider = settingsProvider;
     this.jenkinsClient = jenkinsClient;
     this.mirrorService = mirrorService;
-    this.mappingStore = mappingStore;
+    this.mirrorStore = mirrorStore;
   }
 
   public void start() {
@@ -67,7 +67,7 @@ public class JenkinsBridgePollingService {
       }
     });
 
-    LOG.info("Starting Jenkins Bridge polling; state file: " + mappingStore.getStateFile());
+    LOG.info("Starting Jenkins Bridge polling; state file: " + mirrorStore.getStateFile());
     LOG.info("[Jenkins Bridge DEBUG] Scheduling poller every " + settings.getPollSeconds()
         + " seconds for Jenkins job " + settings.getJenkinsJob()
         + " and TeamCity build type " + settings.getTeamCityBuildTypeId());
@@ -92,10 +92,10 @@ public class JenkinsBridgePollingService {
     try {
       LOG.info("[Jenkins Bridge DEBUG] Poll cycle started");
       pollOnce();
-      mappingStore.markPollSuccess();
+      mirrorStore.markPollSuccess();
       LOG.info("[Jenkins Bridge DEBUG] Poll cycle completed");
     } catch (Exception e) {
-      mappingStore.markPollError(e);
+      mirrorStore.markPollError(e);
       LOG.log(Level.WARNING, "Jenkins Bridge polling failed", e);
     }
   }
@@ -116,7 +116,7 @@ public class JenkinsBridgePollingService {
     }
 
     int latest = Collections.max(numbers);
-    int lastSeen = mappingStore.getLastSeenBuildNumber(job);
+    int lastSeen = mirrorStore.getLastSeenBuildNumber(job);
 
     if (lastSeen == 0) {
       // Cold start: don't replay the whole history. Backfill only the most recent builds, where
@@ -152,8 +152,8 @@ public class JenkinsBridgePollingService {
     for (Integer number : toProcess) {
       maxNumber = Math.max(maxNumber, number);
 
-      JenkinsBuildMapping existing = mappingStore.findMapping(JenkinsBuildMappingStore.buildKey(job, number));
-      if (existing != null && JenkinsBuildState.TEAMCITY_FINISHED.equals(existing.getState())) {
+      BuildMirror existing = mirrorStore.findMirror(BuildMirrorStore.buildKey(job, number));
+      if (existing != null && existing.getSyncState() == SyncState.TEAMCITY_FINISHED) {
         // Already mirrored and finished: account for it (advance watermark) without any Jenkins calls (P2).
         continue;
       }
@@ -163,60 +163,60 @@ public class JenkinsBridgePollingService {
     }
 
     // Keep syncing builds that are still in progress but already past the watermark.
-    for (JenkinsBuildMapping active : mappingStore.getActiveMappings(job)) {
+    for (BuildMirror active : mirrorStore.getActiveMirrors(job)) {
       if (handled.contains(active.getJenkinsBuildNumber())) {
         continue;
       }
       syncOneBuild(job, active.getJenkinsBuildNumber());
     }
 
-    if (maxNumber > mappingStore.getLastSeenBuildNumber(job)) {
-      mappingStore.setLastSeenBuildNumber(job, maxNumber);
+    if (maxNumber > mirrorStore.getLastSeenBuildNumber(job)) {
+      mirrorStore.setLastSeenBuildNumber(job, maxNumber);
     }
   }
 
   // Syncs a single Jenkins build, isolating failures so one bad build does not abort the poll cycle.
   private void syncOneBuild(String job, int buildNumber) {
-    JenkinsBuildMapping mapping = null;
+    BuildMirror mirror = null;
     try {
       JenkinsBuildInfo buildInfo = jenkinsClient.getBuildInfo(job, buildNumber);
-      mapping = mappingStore.getOrCreateMapping(job, buildInfo);
-      LOG.info("[Jenkins Bridge DEBUG] Syncing Jenkins build " + mapping.getJenkinsBuildKey()
-          + " in state " + mapping.getState()
-          + " with TeamCity build id " + mapping.getTeamCityBuildId());
-      syncBuild(mapping, buildInfo);
-      LOG.info("[Jenkins Bridge DEBUG] Synced Jenkins build " + mapping.getJenkinsBuildKey()
-          + " now in state " + mapping.getState()
-          + " with TeamCity build id " + mapping.getTeamCityBuildId());
+      mirror = mirrorStore.getOrCreateMirror(job, buildInfo);
+      LOG.info("[Jenkins Bridge DEBUG] Syncing Jenkins build " + mirror.getJenkinsBuildKey()
+          + " in state " + mirror.getSyncState()
+          + " with TeamCity build id " + mirror.getTeamCityBuildId());
+      syncBuild(mirror, buildInfo);
+      LOG.info("[Jenkins Bridge DEBUG] Synced Jenkins build " + mirror.getJenkinsBuildKey()
+          + " now in state " + mirror.getSyncState()
+          + " with TeamCity build id " + mirror.getTeamCityBuildId());
     } catch (Exception e) {
-      if (mapping != null) {
-        mappingStore.markBuildError(mapping, e);
+      if (mirror != null) {
+        mirrorStore.markBuildError(mirror, e);
       }
       LOG.log(Level.WARNING, "Failed to sync Jenkins build " + job + "#" + buildNumber, e);
     }
   }
 
-  private void syncBuild(JenkinsBuildMapping mapping, JenkinsBuildInfo buildInfo) throws Exception {
-    long teamCityBuildId = mirrorService.ensureTeamCityBuild(mapping, buildInfo);
-    mirrorService.ensureRunningDataSent(mapping, teamCityBuildId);
-    mirrorService.ensureMetadataLogSent(mapping, teamCityBuildId);
+  private void syncBuild(BuildMirror mirror, JenkinsBuildInfo buildInfo) throws Exception {
+    long teamCityBuildId = mirrorService.ensureTeamCityBuild(mirror, buildInfo);
+    mirrorService.ensureRunningDataSent(mirror, teamCityBuildId);
+    mirrorService.ensureMetadataLogSent(mirror, teamCityBuildId);
 
-    long start = Math.max(0L, mapping.getLastLogOffset());
+    long start = Math.max(0L, mirror.getLastLogOffset());
     JenkinsLogChunk logChunk = jenkinsClient.getProgressiveLog(
-        mapping.getJenkinsJob(), mapping.getJenkinsBuildNumber(), start);
+        mirror.getJenkinsJob(), mirror.getJenkinsBuildNumber(), start);
     LOG.info("[Jenkins Bridge DEBUG] Fetched " + logChunk.getText().length()
-        + " new console character(s) for " + mapping.getJenkinsBuildKey()
+        + " new console character(s) for " + mirror.getJenkinsBuildKey()
         + " from byte offset " + start + " (nextStart=" + logChunk.getNextStart() + ")");
-    mirrorService.syncLogs(mapping, teamCityBuildId, logChunk);
+    mirrorService.syncLogs(mirror, teamCityBuildId, logChunk);
 
     if (!buildInfo.isBuilding()
-        && !mapping.isTestsSynced()
-        && !JenkinsBuildState.TEAMCITY_FINISHED.equals(mapping.getState())) {
-      JenkinsTestReport testReport = jenkinsClient.getTestReport(mapping.getJenkinsJob(), mapping.getJenkinsBuildNumber());
+        && !mirror.isTestsSynced()
+        && mirror.getSyncState() != SyncState.TEAMCITY_FINISHED) {
+      JenkinsTestReport testReport = jenkinsClient.getTestReport(mirror.getJenkinsJob(), mirror.getJenkinsBuildNumber());
       LOG.info("[Jenkins Bridge DEBUG] Read " + testReport.getTestCount()
-          + " Jenkins test(s) for " + mapping.getJenkinsBuildKey());
-      mirrorService.syncTestsIfNeeded(mapping, teamCityBuildId, testReport);
+          + " Jenkins test(s) for " + mirror.getJenkinsBuildKey());
+      mirrorService.syncTestsIfNeeded(mirror, teamCityBuildId, testReport);
     }
-    mirrorService.finishBuildIfNeeded(mapping, teamCityBuildId, buildInfo);
+    mirrorService.finishBuildIfNeeded(mirror, teamCityBuildId, buildInfo);
   }
 }

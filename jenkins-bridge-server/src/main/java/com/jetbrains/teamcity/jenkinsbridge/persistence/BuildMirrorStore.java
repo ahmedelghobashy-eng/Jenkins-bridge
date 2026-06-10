@@ -1,4 +1,4 @@
-package com.jetbrains.teamcity.jenkinsbridge.mapping;
+package com.jetbrains.teamcity.jenkinsbridge.persistence;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -22,8 +22,8 @@ import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-public class JenkinsBuildMappingStore {
-  private static final Logger LOG = Logger.getLogger(JenkinsBuildMappingStore.class.getName());
+public class BuildMirrorStore {
+  private static final Logger LOG = Logger.getLogger(BuildMirrorStore.class.getName());
 
   private final JenkinsBridgeSettingsProvider settingsProvider;
   private final ServerPaths serverPaths;
@@ -31,61 +31,61 @@ public class JenkinsBuildMappingStore {
   private Path loadedStateFile;
   private BridgeState state;
 
-  public JenkinsBuildMappingStore(ServerPaths serverPaths, JenkinsBridgeSettingsProvider settingsProvider) {
+  public BuildMirrorStore(ServerPaths serverPaths, JenkinsBridgeSettingsProvider settingsProvider) {
     this.serverPaths = serverPaths;
     this.settingsProvider = settingsProvider;
   }
 
-  public synchronized JenkinsBuildMapping getOrCreateMapping(String jobName, JenkinsBuildInfo jenkinsInfo) throws IOException {
+  public synchronized BuildMirror getOrCreateMirror(String jobName, JenkinsBuildInfo jenkinsInfo) throws IOException {
     ensureLoaded();
 
     String key = buildKey(jobName, jenkinsInfo.getNumber());
-    JenkinsBuildMapping mapping = state.getBuilds().get(key);
-    if (mapping == null) {
-      mapping = JenkinsBuildMapping.create(key, jobName, jenkinsInfo, settings().getTeamCityBuildTypeId(), now());
-      state.getBuilds().put(key, mapping);
+    BuildMirror mirror = state.getBuilds().get(key);
+    if (mirror == null) {
+      mirror = BuildMirror.create(key, jobName, jenkinsInfo, settings().getTeamCityBuildTypeId(), now());
+      state.getBuilds().put(key, mirror);
       saveState();
-      return mapping;
+      return mirror;
     }
 
     boolean changed = false;
-    if (!nullToEmpty(jenkinsInfo.getUrl()).equals(nullToEmpty(mapping.getJenkinsBuildUrl()))) {
-      mapping.setJenkinsBuildUrl(jenkinsInfo.getUrl());
+    if (!nullToEmpty(jenkinsInfo.getUrl()).equals(nullToEmpty(mirror.getJenkinsBuildUrl()))) {
+      mirror.setJenkinsBuildUrl(jenkinsInfo.getUrl());
       changed = true;
     }
-    if (!settings().getTeamCityBuildTypeId().equals(mapping.getTeamCityBuildTypeId())) {
-      mapping.setTeamCityBuildTypeId(settings().getTeamCityBuildTypeId());
+    if (!settings().getTeamCityBuildTypeId().equals(mirror.getTeamCityBuildTypeId())) {
+      mirror.setTeamCityBuildTypeId(settings().getTeamCityBuildTypeId());
       changed = true;
     }
 
     if (changed) {
-      saveMapping(mapping);
+      saveMirror(mirror);
     }
 
-    return mapping;
+    return mirror;
   }
 
-  public synchronized void saveMapping(JenkinsBuildMapping mapping) throws IOException {
+  public synchronized void saveMirror(BuildMirror mirror) throws IOException {
     ensureLoaded();
-    mapping.setUpdatedAt(now());
-    state.getBuilds().put(mapping.getJenkinsBuildKey(), mapping);
+    mirror.setUpdatedAt(now());
+    state.getBuilds().put(mirror.getJenkinsBuildKey(), mirror);
     saveState();
   }
 
-  /** Returns the mapping for the given key, or {@code null} if none exists. Does not create one. */
-  public synchronized JenkinsBuildMapping findMapping(String key) throws IOException {
+  /** Returns the mirror for the given key, or {@code null} if none exists. Does not create one. */
+  public synchronized BuildMirror findMirror(String key) throws IOException {
     ensureLoaded();
     return state.getBuilds().get(key);
   }
 
-  /** Returns mappings for the job that have not yet reached {@code TEAMCITY_FINISHED}. */
-  public synchronized List<JenkinsBuildMapping> getActiveMappings(String jobName) throws IOException {
+  /** Returns mirrors for the job that have not yet reached {@code TEAMCITY_FINISHED}. */
+  public synchronized List<BuildMirror> getActiveMirrors(String jobName) throws IOException {
     ensureLoaded();
-    List<JenkinsBuildMapping> active = new ArrayList<JenkinsBuildMapping>();
-    for (JenkinsBuildMapping mapping : state.getBuilds().values()) {
-      if (jobName.equals(mapping.getJenkinsJob())
-          && !JenkinsBuildState.TEAMCITY_FINISHED.equals(mapping.getState())) {
-        active.add(mapping);
+    List<BuildMirror> active = new ArrayList<BuildMirror>();
+    for (BuildMirror mirror : state.getBuilds().values()) {
+      if (jobName.equals(mirror.getJenkinsJob())
+          && mirror.getSyncState() != SyncState.TEAMCITY_FINISHED) {
+        active.add(mirror);
       }
     }
     return active;
@@ -107,11 +107,11 @@ public class JenkinsBuildMappingStore {
     saveState();
   }
 
-  public synchronized void markBuildError(JenkinsBuildMapping mapping, Exception error) {
+  public synchronized void markBuildError(BuildMirror mirror, Exception error) {
     try {
-      mapping.setState(JenkinsBuildState.FAILED_TO_SYNC);
-      mapping.setLastError(error.getMessage());
-      saveMapping(mapping);
+      mirror.setSyncState(SyncState.FAILED_TO_SYNC);
+      mirror.setLastError(error.getMessage());
+      saveMirror(mirror);
     } catch (IOException saveError) {
       LOG.log(Level.WARNING, "Failed to persist Jenkins Bridge build error", saveError);
     }
@@ -179,7 +179,7 @@ public class JenkinsBuildMappingStore {
 
     if (parseError != null) {
       // A corrupt/truncated state file must not brick the bridge (R7). Move it aside and start
-      // fresh; mappings re-bind to existing TeamCity builds via restore-by-key on the next sync.
+      // fresh; mirrors re-bind to existing TeamCity builds via restore-by-key on the next sync.
       LOG.log(Level.WARNING,
           "Jenkins Bridge state file " + stateFile + " is corrupt; quarantining it and starting with empty state",
           parseError);

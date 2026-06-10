@@ -33,8 +33,8 @@
   <bean id="teamCityBuildFinisher"
         class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildFinisher"/>
 
-  <bean id="jenkinsBuildMappingStore"
-        class="com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildMappingStore"/>
+  <bean id="buildMirrorStore"
+        class="com.jetbrains.teamcity.jenkinsbridge.persistence.BuildMirrorStore"/>
 
   <bean id="teamCityBuildMirrorService"
         class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildMirrorService"/>

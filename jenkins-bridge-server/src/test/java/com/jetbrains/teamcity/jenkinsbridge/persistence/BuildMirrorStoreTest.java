@@ -1,4 +1,4 @@
-package com.jetbrains.teamcity.jenkinsbridge.mapping;
+package com.jetbrains.teamcity.jenkinsbridge.persistence;
 
 import com.google.gson.JsonObject;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
@@ -17,18 +17,18 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-public class JenkinsBuildMappingStoreTest {
+public class BuildMirrorStoreTest {
   @Test
   public void lastSeenBuildNumberPersistsAndIsMonotonic() throws Exception {
     JenkinsBridgeSettingsProvider provider = providerWithTempStateFile();
-    JenkinsBuildMappingStore store = new JenkinsBuildMappingStore(null, provider);
+    BuildMirrorStore store = new BuildMirrorStore(null, provider);
 
     assertEquals(0, store.getLastSeenBuildNumber("job"));
     store.setLastSeenBuildNumber("job", 42);
     assertEquals(42, store.getLastSeenBuildNumber("job"));
 
     // A fresh store instance must read the watermark back from disk.
-    JenkinsBuildMappingStore reloaded = new JenkinsBuildMappingStore(null, provider);
+    BuildMirrorStore reloaded = new BuildMirrorStore(null, provider);
     assertEquals(42, reloaded.getLastSeenBuildNumber("job"));
 
     // Lower values are ignored (watermark only moves forward).
@@ -37,26 +37,26 @@ public class JenkinsBuildMappingStoreTest {
   }
 
   @Test
-  public void getActiveMappingsExcludesFinishedBuilds() throws Exception {
-    JenkinsBuildMappingStore store = new JenkinsBuildMappingStore(null, providerWithTempStateFile());
+  public void getActiveMirrorsExcludesFinishedBuilds() throws Exception {
+    BuildMirrorStore store = new BuildMirrorStore(null, providerWithTempStateFile());
 
-    store.getOrCreateMapping("job", buildInfo(1));
-    JenkinsBuildMapping finished = store.getOrCreateMapping("job", buildInfo(2));
-    finished.setState(JenkinsBuildState.TEAMCITY_FINISHED);
-    store.saveMapping(finished);
+    store.getOrCreateMirror("job", buildInfo(1));
+    BuildMirror finished = store.getOrCreateMirror("job", buildInfo(2));
+    finished.setSyncState(SyncState.TEAMCITY_FINISHED);
+    store.saveMirror(finished);
 
-    List<JenkinsBuildMapping> active = store.getActiveMappings("job");
+    List<BuildMirror> active = store.getActiveMirrors("job");
     assertEquals(1, active.size());
     assertEquals(1, active.get(0).getJenkinsBuildNumber());
   }
 
   @Test
-  public void findMappingReturnsNullWhenAbsent() throws Exception {
-    JenkinsBuildMappingStore store = new JenkinsBuildMappingStore(null, providerWithTempStateFile());
-    store.getOrCreateMapping("job", buildInfo(1));
+  public void findMirrorReturnsNullWhenAbsent() throws Exception {
+    BuildMirrorStore store = new BuildMirrorStore(null, providerWithTempStateFile());
+    store.getOrCreateMirror("job", buildInfo(1));
 
-    assertNotNull(store.findMapping(JenkinsBuildMappingStore.buildKey("job", 1)));
-    assertNull(store.findMapping(JenkinsBuildMappingStore.buildKey("job", 999)));
+    assertNotNull(store.findMirror(BuildMirrorStore.buildKey("job", 1)));
+    assertNull(store.findMirror(BuildMirrorStore.buildKey("job", 999)));
   }
 
   @Test
@@ -65,12 +65,12 @@ public class JenkinsBuildMappingStoreTest {
     stateFile.deleteOnExit();
     Files.write(stateFile.toPath(), "@@@ definitely not json @@@".getBytes(StandardCharsets.UTF_8));
 
-    JenkinsBuildMappingStore store =
-        new JenkinsBuildMappingStore(null, providerForStateFile(stateFile.getAbsolutePath()));
+    BuildMirrorStore store =
+        new BuildMirrorStore(null, providerForStateFile(stateFile.getAbsolutePath()));
 
     // Must not throw, and must start from empty state.
     assertEquals(0, store.getLastSeenBuildNumber("job"));
-    assertNull(store.findMapping(JenkinsBuildMappingStore.buildKey("job", 1)));
+    assertNull(store.findMirror(BuildMirrorStore.buildKey("job", 1)));
 
     // The corrupt file is moved aside to a .corrupt-* sibling rather than left to brick every poll.
     File[] quarantined = stateFile.getParentFile()

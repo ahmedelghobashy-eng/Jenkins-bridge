@@ -1,15 +1,22 @@
-package com.jetbrains.teamcity.jenkinsbridge.mapping;
+package com.jetbrains.teamcity.jenkinsbridge.persistence;
 
+import com.google.gson.annotations.SerializedName;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
 
-public class JenkinsBuildMapping {
+/**
+ * Per-build mirror record: correlates one Jenkins build with its TeamCity build and tracks how far
+ * the sync has progressed. One instance per Jenkins build; persisted in {@link BridgeState}.
+ */
+public class BuildMirror {
   private String jenkinsBuildKey;
   private String jenkinsJob;
   private int jenkinsBuildNumber;
   private String jenkinsBuildUrl;
   private Long teamCityBuildId;
   private String teamCityBuildTypeId;
-  private String state;
+  // Persisted under the legacy JSON key "state" so existing state files keep deserializing.
+  @SerializedName("state")
+  private SyncState syncState;
   // Byte offset into the Jenkins console log already mirrored (Jenkins progressive-log X-Text-Size).
   private long lastLogOffset;
   private boolean metadataLogSent;
@@ -21,27 +28,27 @@ public class JenkinsBuildMapping {
   private String createdAt;
   private String updatedAt;
 
-  public static JenkinsBuildMapping create(
+  public static BuildMirror create(
       String key,
       String job,
       JenkinsBuildInfo jenkinsInfo,
       String teamCityBuildTypeId,
       String now
   ) {
-    JenkinsBuildMapping mapping = new JenkinsBuildMapping();
-    mapping.jenkinsBuildKey = key;
-    mapping.jenkinsJob = job;
-    mapping.jenkinsBuildNumber = jenkinsInfo.getNumber();
-    mapping.jenkinsBuildUrl = jenkinsInfo.getUrl();
-    mapping.teamCityBuildTypeId = teamCityBuildTypeId;
-    mapping.state = JenkinsBuildState.DISCOVERED;
-    mapping.lastLogOffset = 0;
-    mapping.metadataLogSent = false;
-    mapping.summaryLogSent = false;
-    mapping.testsSynced = false;
-    mapping.createdAt = now;
-    mapping.updatedAt = now;
-    return mapping;
+    BuildMirror mirror = new BuildMirror();
+    mirror.jenkinsBuildKey = key;
+    mirror.jenkinsJob = job;
+    mirror.jenkinsBuildNumber = jenkinsInfo.getNumber();
+    mirror.jenkinsBuildUrl = jenkinsInfo.getUrl();
+    mirror.teamCityBuildTypeId = teamCityBuildTypeId;
+    mirror.syncState = SyncState.DISCOVERED;
+    mirror.lastLogOffset = 0;
+    mirror.metadataLogSent = false;
+    mirror.summaryLogSent = false;
+    mirror.testsSynced = false;
+    mirror.createdAt = now;
+    mirror.updatedAt = now;
+    return mirror;
   }
 
   public String getJenkinsBuildKey() {
@@ -80,12 +87,12 @@ public class JenkinsBuildMapping {
     this.teamCityBuildTypeId = teamCityBuildTypeId;
   }
 
-  public String getState() {
-    return state;
+  public SyncState getSyncState() {
+    return syncState;
   }
 
-  public void setState(String state) {
-    this.state = state;
+  public void setSyncState(SyncState syncState) {
+    this.syncState = syncState;
   }
 
   public long getLastLogOffset() {

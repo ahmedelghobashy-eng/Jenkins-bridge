@@ -1,11 +1,11 @@
-package com.jetbrains.teamcity.jenkinsbridge.mapping;
+package com.jetbrains.teamcity.jenkinsbridge.persistence;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 public class BridgeState {
   private int version = 1;
-  private Map<String, JenkinsBuildMapping> builds = new LinkedHashMap<String, JenkinsBuildMapping>();
+  private Map<String, BuildMirror> builds = new LinkedHashMap<String, BuildMirror>();
   // Highest Jenkins build number already discovered per job, used as an incremental-polling watermark.
   private Map<String, Integer> lastSeenBuildNumbers = new LinkedHashMap<String, Integer>();
   private String lastPollTime;
@@ -19,9 +19,9 @@ public class BridgeState {
     this.version = version;
   }
 
-  public Map<String, JenkinsBuildMapping> getBuilds() {
+  public Map<String, BuildMirror> getBuilds() {
     if (builds == null) {
-      builds = new LinkedHashMap<String, JenkinsBuildMapping>();
+      builds = new LinkedHashMap<String, BuildMirror>();
     }
     return builds;
   }
