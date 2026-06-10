@@ -52,6 +52,12 @@
  Recent build limit: 1
  Time zone: Europe/Berlin
 
+ 'Recent build limit' is the cold-start backfill depth: on the first poll for a
+ job the bridge starts from (latest build - recentBuildLimit), so it mirrors only
+ the most recent build(s) instead of replaying the whole Jenkins history. After
+ that, polling is incremental by build number (every build after the last one is
+ picked up), so this value no longer bounds steady-state discovery.
+
  The default state file is stored in TeamCity plugin data:
 
  <TEAMCITY_DATA_PATH>/system/pluginData/jenkins-bridge/jenkins-teamcity-mapping.json
@@ -79,7 +85,22 @@
  3. Install
  To install the plugin, put zip archive to 'plugins' dir under TeamCity data directory and restart the server.
 
- 
+ Paused and long-running builds
+
+ A Jenkins build that is paused - either paused by a user (Pipeline
+ Pause/Resume) or waiting at an 'input' step - still reports itself as building
+ over the REST API (building=true, no result). Jenkins does not expose "paused"
+ as a distinct state (see JENKINS-56556), so the bridge cannot tell a paused
+ build apart from one that is actively running.
+
+ The bridge therefore keeps the mirrored TeamCity build in the running state for
+ the whole pause. It does not prematurely finish it, it keeps mirroring other
+ and newer Jenkins builds in the meantime, and it finishes the TeamCity build
+ with the correct result once Jenkins resumes (success/failure) or the build is
+ aborted (cancelled). The pause itself is not labelled in TeamCity - the build
+ simply shows as running.
+
+
 TODO:
 
 Current scope:

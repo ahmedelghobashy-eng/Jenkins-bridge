@@ -5,6 +5,7 @@ import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildMapping;
 import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildMappingStore;
 import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildState;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsLogChunk;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsTestReport;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettings;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettingsProvider;
@@ -129,21 +130,17 @@ public class TeamCityBuildMirrorService {
     mappingStore.saveMapping(mapping);
   }
 
-  public void syncLogs(JenkinsBuildMapping mapping, long teamCityBuildId, String consoleText)
+  public void syncLogs(JenkinsBuildMapping mapping, long teamCityBuildId, JenkinsLogChunk logChunk)
       throws BridgeHttpException, IOException {
-    int lastOffset = Math.max(0, mapping.getLastLogOffset());
-    if (lastOffset > consoleText.length()) {
-      lastOffset = 0;
-    }
-
-    String newLog = consoleText.substring(lastOffset);
+    String newLog = logChunk.getText();
     if (newLog.length() == 0) {
+      // Nothing new since the last poll; do not append or rewrite state.
       return;
     }
 
     teamCityBuildLogger.addBuildLog(teamCityBuildId, newLog);
 
-    mapping.setLastLogOffset(consoleText.length());
+    mapping.setLastLogOffset(logChunk.getNextStart());
     mapping.setState(JenkinsBuildState.LOG_SYNCING);
     mapping.setLastError(null);
     mappingStore.saveMapping(mapping);

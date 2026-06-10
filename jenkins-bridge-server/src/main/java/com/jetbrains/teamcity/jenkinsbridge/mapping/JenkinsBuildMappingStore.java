@@ -17,6 +17,8 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -67,6 +69,41 @@ public class JenkinsBuildMappingStore {
     ensureLoaded();
     mapping.setUpdatedAt(now());
     state.getBuilds().put(mapping.getJenkinsBuildKey(), mapping);
+    saveState();
+  }
+
+  /** Returns the mapping for the given key, or {@code null} if none exists. Does not create one. */
+  public synchronized JenkinsBuildMapping findMapping(String key) throws IOException {
+    ensureLoaded();
+    return state.getBuilds().get(key);
+  }
+
+  /** Returns mappings for the job that have not yet reached {@code TEAMCITY_FINISHED}. */
+  public synchronized List<JenkinsBuildMapping> getActiveMappings(String jobName) throws IOException {
+    ensureLoaded();
+    List<JenkinsBuildMapping> active = new ArrayList<JenkinsBuildMapping>();
+    for (JenkinsBuildMapping mapping : state.getBuilds().values()) {
+      if (jobName.equals(mapping.getJenkinsJob())
+          && !JenkinsBuildState.TEAMCITY_FINISHED.equals(mapping.getState())) {
+        active.add(mapping);
+      }
+    }
+    return active;
+  }
+
+  public synchronized int getLastSeenBuildNumber(String jobName) throws IOException {
+    ensureLoaded();
+    Integer value = state.getLastSeenBuildNumbers().get(jobName);
+    return value == null ? 0 : value;
+  }
+
+  public synchronized void setLastSeenBuildNumber(String jobName, int buildNumber) throws IOException {
+    ensureLoaded();
+    Integer current = state.getLastSeenBuildNumbers().get(jobName);
+    if (current != null && current >= buildNumber) {
+      return;
+    }
+    state.getLastSeenBuildNumbers().put(jobName, buildNumber);
     saveState();
   }
 

@@ -80,7 +80,8 @@ public class TeamCityTestReporter {
         }
         if (testCase.isIgnored()) {
           messages.add(serverMessage(DefaultMessagesInfo.createTestIgnoreMessage(testName, testCase.getSkippedMessage())));
-        } else if (testCase.isFailed()) {
+        }
+        else if (testCase.isFailed()) {
           messages.add(serverMessage(DefaultMessagesInfo.createTestFailure(
               testName,
               testCase.getErrorDetails(),

@@ -8,20 +8,28 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 public class BridgeHttpClient {
   public String get(String url, String user, String password, String accept) throws BridgeHttpException {
+    return getResponse(url, user, password, accept).getBody();
+  }
+
+  public BridgeHttpResponse getResponse(String url, String user, String password, String accept) throws BridgeHttpException {
     return request("GET", url, user, password, null, null, accept);
   }
 
   public String post(String url, String user, String password, String body, String contentType, String accept) throws BridgeHttpException {
-    return request("POST", url, user, password, body, contentType, accept);
+    return request("POST", url, user, password, body, contentType, accept).getBody();
   }
 
   public String put(String url, String user, String password, String body, String contentType, String accept) throws BridgeHttpException {
-    return request("PUT", url, user, password, body, contentType, accept);
+    return request("PUT", url, user, password, body, contentType, accept).getBody();
   }
-  private String request(
+
+  private BridgeHttpResponse request(
       String method,
       String url,
       String user,
@@ -70,7 +78,7 @@ public class BridgeHttpClient {
         throw new BridgeHttpException(method, url, status, responseBody);
       }
 
-      return responseBody;
+      return new BridgeHttpResponse(status, responseBody, collectHeaders(connection));
     } catch (IOException e) {
       throw new BridgeHttpException(method, url, e);
     } finally {
@@ -78,6 +86,20 @@ public class BridgeHttpClient {
         connection.disconnect();
       }
     }
+  }
+
+  private Map<String, String> collectHeaders(HttpURLConnection connection) {
+    Map<String, String> headers = new LinkedHashMap<String, String>();
+    Map<String, List<String>> fields = connection.getHeaderFields();
+    if (fields != null) {
+      for (Map.Entry<String, List<String>> entry : fields.entrySet()) {
+        // The status line is exposed under a null key; skip it.
+        if (entry.getKey() != null && entry.getValue() != null && !entry.getValue().isEmpty()) {
+          headers.put(entry.getKey(), entry.getValue().get(0));
+        }
+      }
+    }
+    return headers;
   }
 
   private String readResponseBody(HttpURLConnection connection, int status) throws IOException {

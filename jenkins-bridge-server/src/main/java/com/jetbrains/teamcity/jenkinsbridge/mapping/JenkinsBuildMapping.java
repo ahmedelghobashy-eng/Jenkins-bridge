@@ -10,7 +10,8 @@ public class JenkinsBuildMapping {
   private Long teamCityBuildId;
   private String teamCityBuildTypeId;
   private String state;
-  private int lastLogOffset;
+  // Byte offset into the Jenkins console log already mirrored (Jenkins progressive-log X-Text-Size).
+  private long lastLogOffset;
   private boolean metadataLogSent;
   private boolean summaryLogSent;
   private boolean testsSynced;
@@ -87,11 +88,11 @@ public class JenkinsBuildMapping {
     this.state = state;
   }
 
-  public int getLastLogOffset() {
+  public long getLastLogOffset() {
     return lastLogOffset;
   }
 
-  public void setLastLogOffset(int lastLogOffset) {
+  public void setLastLogOffset(long lastLogOffset) {
     this.lastLogOffset = lastLogOffset;
   }
 

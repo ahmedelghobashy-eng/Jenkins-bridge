@@ -5,13 +5,17 @@ import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildMapping;
 import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildMappingStore;
 import com.jetbrains.teamcity.jenkinsbridge.mapping.JenkinsBuildState;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsLogChunk;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsTestReport;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettings;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettingsProvider;
 import com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildMirrorService;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
@@ -102,31 +106,92 @@ public class JenkinsBridgePollingService {
       throw new IllegalStateException(settings.describeMinimumConfigurationProblem());
     }
 
-    // TODO for this POC we just poll the recent builds within a certain limit,
-    // We should consider polling since the last build number we polled.
-    List<JenkinsBuildInfo> recentBuilds = jenkinsClient.getRecentBuilds(
-        settings.getJenkinsJob(),
-        settings.getRecentBuildLimit()
-    );
-    LOG.info("[Jenkins Bridge DEBUG] Jenkins returned " + recentBuilds.size()
-        + " recent build(s) for job " + settings.getJenkinsJob());
-    Collections.reverse(recentBuilds);
+    String job = settings.getJenkinsJob();
 
-    for (JenkinsBuildInfo recentBuild : recentBuilds) {
-      JenkinsBuildInfo buildInfo = jenkinsClient.getBuildInfo(settings.getJenkinsJob(), recentBuild.getNumber());
-      JenkinsBuildMapping mapping = mappingStore.getOrCreateMapping(settings.getJenkinsJob(), buildInfo);
-      try {
-        LOG.info("[Jenkins Bridge DEBUG] Syncing Jenkins build " + mapping.getJenkinsBuildKey()
-            + " in state " + mapping.getState()
-            + " with TeamCity build id " + mapping.getTeamCityBuildId());
-        syncBuild(mapping, buildInfo);
-        LOG.info("[Jenkins Bridge DEBUG] Synced Jenkins build " + mapping.getJenkinsBuildKey()
-            + " now in state " + mapping.getState()
-            + " with TeamCity build id " + mapping.getTeamCityBuildId());
-      } catch (Exception e) {
-        mappingStore.markBuildError(mapping, e);
-        LOG.log(Level.WARNING, "Failed to sync Jenkins build " + mapping.getJenkinsBuildKey(), e);
+    // Fetch the most recent build numbers (Jenkins caps this at the 100 newest).
+    List<Integer> numbers = jenkinsClient.getBuildNumbers(job);
+    if (numbers.isEmpty()) {
+      LOG.info("[Jenkins Bridge DEBUG] Jenkins job " + job + " has no builds yet");
+      return;
+    }
+
+    int latest = Collections.max(numbers);
+    int lastSeen = mappingStore.getLastSeenBuildNumber(job);
+
+    if (lastSeen == 0) {
+      // Cold start: don't replay the whole history. Backfill only the most recent builds, where
+      // recentBuildLimit is the backfill depth (default 1 = start from the latest build).
+      lastSeen = Math.max(0, latest - settings.getRecentBuildLimit());
+      LOG.info("[Jenkins Bridge DEBUG] Cold start for job " + job
+          + "; backfilling from build " + (lastSeen + 1) + " (latest=" + latest + ")");
+    } else if (Collections.min(numbers) > lastSeen + 1) {
+      // We were running before but more than ~100 builds have happened since, so the cheap
+      // builds[number] view no longer reaches back to lastSeen. Escalate to allBuilds so we
+      // never skip a build (rare; only after a long outage).
+      LOG.info("[Jenkins Bridge DEBUG] Gap detected for job " + job
+          + " (lastSeen=" + lastSeen + ", oldest fetched=" + Collections.min(numbers)
+          + "); fetching all build numbers");
+      numbers = jenkinsClient.getAllBuildNumbers(job);
+    }
+
+    // Process every build strictly after the watermark, oldest first.
+    List<Integer> toProcess = new ArrayList<Integer>();
+    for (Integer number : numbers) {
+      if (number > lastSeen) {
+        toProcess.add(number);
       }
+    }
+    Collections.sort(toProcess);
+    LOG.info("[Jenkins Bridge DEBUG] Job " + job + ": " + toProcess.size()
+        + " build(s) after watermark " + lastSeen);
+
+    Set<Integer> handled = new HashSet<Integer>();
+    int maxNumber = lastSeen;
+
+    for (Integer number : toProcess) {
+      maxNumber = Math.max(maxNumber, number);
+
+      JenkinsBuildMapping existing = mappingStore.findMapping(JenkinsBuildMappingStore.buildKey(job, number));
+      if (existing != null && JenkinsBuildState.TEAMCITY_FINISHED.equals(existing.getState())) {
+        // Already mirrored and finished: account for it (advance watermark) without any Jenkins calls (P2).
+        continue;
+      }
+
+      syncOneBuild(job, number);
+      handled.add(number);
+    }
+
+    // Keep syncing builds that are still in progress but already past the watermark.
+    for (JenkinsBuildMapping active : mappingStore.getActiveMappings(job)) {
+      if (handled.contains(active.getJenkinsBuildNumber())) {
+        continue;
+      }
+      syncOneBuild(job, active.getJenkinsBuildNumber());
+    }
+
+    if (maxNumber > mappingStore.getLastSeenBuildNumber(job)) {
+      mappingStore.setLastSeenBuildNumber(job, maxNumber);
+    }
+  }
+
+  // Syncs a single Jenkins build, isolating failures so one bad build does not abort the poll cycle.
+  private void syncOneBuild(String job, int buildNumber) {
+    JenkinsBuildMapping mapping = null;
+    try {
+      JenkinsBuildInfo buildInfo = jenkinsClient.getBuildInfo(job, buildNumber);
+      mapping = mappingStore.getOrCreateMapping(job, buildInfo);
+      LOG.info("[Jenkins Bridge DEBUG] Syncing Jenkins build " + mapping.getJenkinsBuildKey()
+          + " in state " + mapping.getState()
+          + " with TeamCity build id " + mapping.getTeamCityBuildId());
+      syncBuild(mapping, buildInfo);
+      LOG.info("[Jenkins Bridge DEBUG] Synced Jenkins build " + mapping.getJenkinsBuildKey()
+          + " now in state " + mapping.getState()
+          + " with TeamCity build id " + mapping.getTeamCityBuildId());
+    } catch (Exception e) {
+      if (mapping != null) {
+        mappingStore.markBuildError(mapping, e);
+      }
+      LOG.log(Level.WARNING, "Failed to sync Jenkins build " + job + "#" + buildNumber, e);
     }
   }
 
@@ -135,11 +200,14 @@ public class JenkinsBridgePollingService {
     mirrorService.ensureRunningDataSent(mapping, teamCityBuildId);
     mirrorService.ensureMetadataLogSent(mapping, teamCityBuildId);
 
-    String consoleText = jenkinsClient.getConsoleText(mapping.getJenkinsJob(), mapping.getJenkinsBuildNumber());
-    LOG.info("[Jenkins Bridge DEBUG] Read " + consoleText.length()
-        + " console character(s) for " + mapping.getJenkinsBuildKey()
-        + "; previous offset " + mapping.getLastLogOffset());
-    mirrorService.syncLogs(mapping, teamCityBuildId, consoleText);
+    long start = Math.max(0L, mapping.getLastLogOffset());
+    JenkinsLogChunk logChunk = jenkinsClient.getProgressiveLog(
+        mapping.getJenkinsJob(), mapping.getJenkinsBuildNumber(), start);
+    LOG.info("[Jenkins Bridge DEBUG] Fetched " + logChunk.getText().length()
+        + " new console character(s) for " + mapping.getJenkinsBuildKey()
+        + " from byte offset " + start + " (nextStart=" + logChunk.getNextStart() + ")");
+    mirrorService.syncLogs(mapping, teamCityBuildId, logChunk);
+
     if (!buildInfo.isBuilding()
         && !mapping.isTestsSynced()
         && !JenkinsBuildState.TEAMCITY_FINISHED.equals(mapping.getState())) {
@@ -148,8 +216,6 @@ public class JenkinsBridgePollingService {
           + " Jenkins test(s) for " + mapping.getJenkinsBuildKey());
       mirrorService.syncTestsIfNeeded(mapping, teamCityBuildId, testReport);
     }
-
-    // I think here I should have a sync status if needed..
     mirrorService.finishBuildIfNeeded(mapping, teamCityBuildId, buildInfo);
   }
 }

@@ -6,7 +6,9 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpClient;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpException;
+import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpResponse;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsLogChunk;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsTestReport;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettings;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettingsProvider;
@@ -26,9 +28,27 @@ public class JenkinsClient {
     this.httpClient = httpClient;
   }
 
-  public List<JenkinsBuildInfo> getRecentBuilds(String jobName, int limit) throws BridgeHttpException {
+  /**
+   * Returns the numbers of the (up to 100) most recent builds. Jenkins caps the {@code builds}
+   * collection at the 100 newest builds to avoid loading the whole history; callers that may have
+   * fallen further behind can escalate to {@link #getAllBuildNumbers(String)}.
+   */
+  public List<Integer> getBuildNumbers(String jobName) throws BridgeHttpException {
+    return fetchBuildNumbers(jobName, "builds");
+  }
+
+  /**
+   * Returns the numbers of all builds via Jenkins' {@code allBuilds} collection. This is complete
+   * but can be expensive on jobs with a long history, so use it only as a fallback when a gap is
+   * detected below the {@link #getBuildNumbers(String)} window.
+   */
+  public List<Integer> getAllBuildNumbers(String jobName) throws BridgeHttpException {
+    return fetchBuildNumbers(jobName, "allBuilds");
+  }
+
+  private List<Integer> fetchBuildNumbers(String jobName, String collection) throws BridgeHttpException {
     JenkinsBridgeSettings settings = settingsProvider.load();
-    String tree = "builds[number,url,building,result,timestamp,duration]{0," + limit + "}";
+    String tree = collection + "[number]";
     String url = settings.getJenkinsUrl()
         + jenkinsJobPath(jobName)
         + "/api/json?tree="
@@ -36,17 +56,23 @@ public class JenkinsClient {
 
     String response = httpClient.get(url, settings.getJenkinsUser(), settings.getJenkinsToken(), "application/json");
     JsonObject root = jsonParser.parse(response).getAsJsonObject();
-    JsonArray builds = root.getAsJsonArray("builds");
-    List<JenkinsBuildInfo> result = new ArrayList<JenkinsBuildInfo>();
+    JsonArray builds = root.getAsJsonArray(collection);
+    List<Integer> numbers = new ArrayList<Integer>();
     if (builds == null) {
-      return result;
+      return numbers;
     }
 
     for (JsonElement build : builds) {
-      result.add(JenkinsBuildInfo.fromJson(build.getAsJsonObject()));
+      if (build == null || !build.isJsonObject()) {
+        continue;
+      }
+      JsonElement number = build.getAsJsonObject().get("number");
+      if (number != null && !number.isJsonNull()) {
+        numbers.add(number.getAsInt());
+      }
     }
 
-    return result;
+    return numbers;
   }
 
   public JenkinsBuildInfo getBuildInfo(String jobName, int buildNumber) throws BridgeHttpException {
@@ -63,15 +89,39 @@ public class JenkinsClient {
     return JenkinsBuildInfo.fromJson(jsonParser.parse(response).getAsJsonObject());
   }
 
-  public String getConsoleText(String jobName, int buildNumber) throws BridgeHttpException {
+  /**
+   * Fetches only the console output produced since {@code start} (a byte offset) using Jenkins'
+   * progressive log API, instead of re-downloading the whole console each poll.
+   */
+  public JenkinsLogChunk getProgressiveLog(String jobName, int buildNumber, long start) throws BridgeHttpException {
     JenkinsBridgeSettings settings = settingsProvider.load();
+    long safeStart = Math.max(0L, start);
     String url = settings.getJenkinsUrl()
         + jenkinsJobPath(jobName)
         + "/"
         + buildNumber
-        + "/consoleText";
+        + "/logText/progressiveText?start="
+        + safeStart;
 
-    return httpClient.get(url, settings.getJenkinsUser(), settings.getJenkinsToken(), "text/plain");
+    BridgeHttpResponse response = httpClient.getResponse(
+        url, settings.getJenkinsUser(), settings.getJenkinsToken(), "text/plain");
+
+    String text = response.getBody();
+    // X-Text-Size is the new total byte size; fall back to advancing by the body length if absent.
+    long nextStart = parseLong(response.getHeader("X-Text-Size"), safeStart + text.length());
+    boolean hasMoreData = "true".equalsIgnoreCase(response.getHeader("X-More-Data"));
+    return new JenkinsLogChunk(text, nextStart, hasMoreData);
+  }
+
+  private static long parseLong(String value, long defaultValue) {
+    if (value == null) {
+      return defaultValue;
+    }
+    try {
+      return Long.parseLong(value.trim());
+    } catch (NumberFormatException e) {
+      return defaultValue;
+    }
   }
 
   public JenkinsTestReport getTestReport(String jobName, int buildNumber) throws BridgeHttpException {
