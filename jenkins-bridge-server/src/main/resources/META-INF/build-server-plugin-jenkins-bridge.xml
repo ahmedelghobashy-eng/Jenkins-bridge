@@ -36,6 +36,12 @@
   <bean id="buildMirrorStore"
         class="com.jetbrains.teamcity.jenkinsbridge.persistence.BuildMirrorStore"/>
 
+  <bean id="jenkinsBridgeBuildFeature"
+        class="com.jetbrains.teamcity.jenkinsbridge.feature.JenkinsBridgeBuildFeature"/>
+
+  <bean id="jenkinsBridgeMappingProvider"
+        class="com.jetbrains.teamcity.jenkinsbridge.feature.JenkinsBridgeMappingProvider"/>
+
   <bean id="teamCityBuildMirrorService"
         class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildMirrorService"/>
 

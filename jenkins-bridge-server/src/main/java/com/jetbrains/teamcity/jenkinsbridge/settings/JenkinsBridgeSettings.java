@@ -152,6 +152,14 @@ public class JenkinsBridgeSettings {
         && isNotBlank(teamCityBuildTypeId);
   }
 
+  /**
+   * The global Jenkins connection (URL) is required regardless of how jobs are mapped, since the
+   * Jenkins server/credentials are shared across all mappings.
+   */
+  public boolean hasJenkinsConnection() {
+    return isNotBlank(jenkinsUrl);
+  }
+
   public String describeMinimumConfigurationProblem() {
     if (hasMinimumConfiguration()) {
       return "";

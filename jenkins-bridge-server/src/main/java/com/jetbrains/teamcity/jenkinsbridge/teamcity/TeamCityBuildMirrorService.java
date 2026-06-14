@@ -85,7 +85,7 @@ public class TeamCityBuildMirrorService {
     properties.put("jenkins.build.key", mirror.getJenkinsBuildKey());
     properties.put("jenkins.build.url", nullToEmpty(jenkinsInfo.getUrl()));
 
-    long buildId = teamCityBuildQueuer.queueAgentlessBuild(settingsProvider.load().getTeamCityBuildTypeId(), properties);
+    long buildId = teamCityBuildQueuer.queueAgentlessBuild(mirror.getTeamCityBuildTypeId(), properties);
     mirror.setTeamCityBuildId(buildId);
     mirror.setSyncState(SyncState.TEAMCITY_CREATED);
     mirror.setLastError(null);

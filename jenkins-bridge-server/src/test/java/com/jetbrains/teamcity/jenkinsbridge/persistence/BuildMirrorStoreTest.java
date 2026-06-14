@@ -40,8 +40,8 @@ public class BuildMirrorStoreTest {
   public void getActiveMirrorsExcludesFinishedBuilds() throws Exception {
     BuildMirrorStore store = new BuildMirrorStore(null, providerWithTempStateFile());
 
-    store.getOrCreateMirror("job", buildInfo(1));
-    BuildMirror finished = store.getOrCreateMirror("job", buildInfo(2));
+    store.getOrCreateMirror(BuildMirrorStore.buildKey("job", 1), "job", "buildType", buildInfo(1));
+    BuildMirror finished = store.getOrCreateMirror(BuildMirrorStore.buildKey("job", 2), "job", "buildType", buildInfo(2));
     finished.setSyncState(SyncState.TEAMCITY_FINISHED);
     store.saveMirror(finished);
 
@@ -53,7 +53,7 @@ public class BuildMirrorStoreTest {
   @Test
   public void findMirrorReturnsNullWhenAbsent() throws Exception {
     BuildMirrorStore store = new BuildMirrorStore(null, providerWithTempStateFile());
-    store.getOrCreateMirror("job", buildInfo(1));
+    store.getOrCreateMirror(BuildMirrorStore.buildKey("job", 1), "job", "buildType", buildInfo(1));
 
     assertNotNull(store.findMirror(BuildMirrorStore.buildKey("job", 1)));
     assertNull(store.findMirror(BuildMirrorStore.buildKey("job", 999)));
