@@ -17,8 +17,16 @@ import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 public class JenkinsClient {
+  // Jenkins embeds invisible ConsoleNote annotations in the raw console as an ANSI "conceal" block:
+  // ESC[8m + "ha:" + base64 payload + ESC[0m. Jenkins' own UI hides them; the bridge must strip them
+  // so they do not leak into the mirrored TeamCity log as base64 garbage. A note never spans a line,
+  // so the (line-bounded) non-greedy match is safe; a note split across two progressive fetches is a
+  // rare edge that can leak one partial note at the boundary.
+  private static final Pattern CONSOLE_NOTE = Pattern.compile("\\[8m.*?\\[0m");
+
   private final JenkinsBridgeSettingsProvider settingsProvider;
   private final BridgeHttpClient httpClient;
   private final JsonParser jsonParser = new JsonParser();
@@ -106,11 +114,12 @@ public class JenkinsClient {
     BridgeHttpResponse response = httpClient.getResponse(
         url, settings.getJenkinsUser(), settings.getJenkinsToken(), "text/plain");
 
-    String text = response.getBody();
-    // X-Text-Size is the new total byte size; fall back to advancing by the body length if absent.
-    long nextStart = parseLong(response.getHeader("X-Text-Size"), safeStart + text.length());
+    String rawBody = response.getBody();
+    // X-Text-Size is the new total byte size; fall back to advancing by the raw body length if
+    // absent. Offsets track the raw log, so stripping console notes below must not change nextStart.
+    long nextStart = parseLong(response.getHeader("X-Text-Size"), safeStart + rawBody.length());
     boolean hasMoreData = "true".equalsIgnoreCase(response.getHeader("X-More-Data"));
-    return new JenkinsLogChunk(text, nextStart, hasMoreData);
+    return new JenkinsLogChunk(stripConsoleNotes(rawBody), nextStart, hasMoreData);
   }
 
   private static long parseLong(String value, long defaultValue) {
@@ -122,6 +131,17 @@ public class JenkinsClient {
     } catch (NumberFormatException e) {
       return defaultValue;
     }
+  }
+
+  /**
+   * Removes Jenkins ConsoleNote annotations (ESC[8m...ESC[0m conceal blocks) from console text so
+   * they don't leak into the mirrored TeamCity log. Visible for testing.
+   */
+  static String stripConsoleNotes(String text) {
+    if (text == null || text.isEmpty()) {
+      return text == null ? "" : text;
+    }
+    return CONSOLE_NOTE.matcher(text).replaceAll("");
   }
 
   public JenkinsTestReport getTestReport(String jobName, int buildNumber) throws BridgeHttpException {
