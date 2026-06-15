@@ -1,6 +1,6 @@
 package com.jetbrains.teamcity.jenkinsbridge.polling;
 
-import com.jetbrains.teamcity.jenkinsbridge.feature.JenkinsBridgeMappingProvider;
+import com.jetbrains.teamcity.jenkinsbridge.feature.MirroredJobProvider;
 import com.jetbrains.teamcity.jenkinsbridge.jenkins.JenkinsClient;
 import com.jetbrains.teamcity.jenkinsbridge.persistence.BuildMirror;
 import com.jetbrains.teamcity.jenkinsbridge.persistence.BuildMirrorStore;
@@ -10,7 +10,7 @@ import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsLogChunk;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsTestReport;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettings;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettingsProvider;
-import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsJobMapping;
+import com.jetbrains.teamcity.jenkinsbridge.settings.MirroredJob;
 import com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildMirrorService;
 
 import java.util.ArrayList;
@@ -33,7 +33,7 @@ public class JenkinsBridgePollingService {
   private final JenkinsClient jenkinsClient;
   private final TeamCityBuildMirrorService mirrorService;
   private final BuildMirrorStore mirrorStore;
-  private final JenkinsBridgeMappingProvider mappingProvider;
+  private final MirroredJobProvider mirroredJobProvider;
   private final AtomicBoolean started = new AtomicBoolean(false);
   private ScheduledExecutorService executorService;
 
@@ -42,13 +42,13 @@ public class JenkinsBridgePollingService {
       JenkinsClient jenkinsClient,
       TeamCityBuildMirrorService mirrorService,
       BuildMirrorStore mirrorStore,
-      JenkinsBridgeMappingProvider mappingProvider
+      MirroredJobProvider mirroredJobProvider
   ) {
     this.settingsProvider = settingsProvider;
     this.jenkinsClient = jenkinsClient;
     this.mirrorService = mirrorService;
     this.mirrorStore = mirrorStore;
-    this.mappingProvider = mappingProvider;
+    this.mirroredJobProvider = mirroredJobProvider;
   }
 
   public void start() {
@@ -109,28 +109,28 @@ public class JenkinsBridgePollingService {
       throw new IllegalStateException("Jenkins Bridge is missing the global Jenkins server URL (jenkinsUrl)");
     }
 
-    List<JenkinsJobMapping> mappings = mappingProvider.discoverMappings();
-    LOG.info("[Jenkins Bridge DEBUG] Discovered " + mappings.size() + " mapping(s) to mirror");
+    List<MirroredJob> mirroredJobs = mirroredJobProvider.discoverMirroredJobs();
+    LOG.info("[Jenkins Bridge DEBUG] Discovered " + mirroredJobs.size() + " mirrored job(s)");
 
-    for (JenkinsJobMapping mapping : mappings) {
+    for (MirroredJob mirroredJob : mirroredJobs) {
       try {
-        pollMapping(mapping, settings);
+        pollJob(mirroredJob, settings);
       } catch (Exception e) {
-        // Isolate per-mapping failures so one broken job does not abort the rest of the cycle.
-        LOG.log(Level.WARNING, "Jenkins Bridge: failed to poll " + mapping.describeForLog(), e);
+        // Isolate per-job failures so one broken job does not abort the rest of the cycle.
+        LOG.log(Level.WARNING, "Jenkins Bridge: failed to poll " + mirroredJob.describeForLog(), e);
       }
     }
   }
 
-  private void pollMapping(JenkinsJobMapping mapping, JenkinsBridgeSettings settings) throws Exception {
-    if (!mapping.hasMinimumConfiguration()) {
-      LOG.warning(mapping.describeMinimumConfigurationProblem());
+  private void pollJob(MirroredJob mirroredJob, JenkinsBridgeSettings settings) throws Exception {
+    if (!mirroredJob.hasMinimumConfiguration()) {
+      LOG.warning(mirroredJob.describeMinimumConfigurationProblem());
       return;
     }
 
-    String job = mapping.getJenkinsJob();
-    String keyPrefix = mapping.getMirrorKeyPrefix();
-    int recentBuildLimit = mapping.getEffectiveRecentBuildLimit(settings.getRecentBuildLimit());
+    String job = mirroredJob.getJenkinsJob();
+    String keyPrefix = mirroredJob.getMirrorKeyPrefix();
+    int recentBuildLimit = mirroredJob.getEffectiveRecentBuildLimit(settings.getRecentBuildLimit());
 
     // Fetch the most recent build numbers (Jenkins caps this at the 100 newest).
     List<Integer> numbers = jenkinsClient.getBuildNumbers(job);
@@ -167,7 +167,7 @@ public class JenkinsBridgePollingService {
       }
     }
     Collections.sort(toProcess);
-    LOG.info("[Jenkins Bridge DEBUG] " + mapping.describeForLog() + ": " + toProcess.size()
+    LOG.info("[Jenkins Bridge DEBUG] " + mirroredJob.describeForLog() + ": " + toProcess.size()
         + " build(s) after watermark " + lastSeen);
 
     Set<Integer> handled = new HashSet<Integer>();
@@ -182,19 +182,19 @@ public class JenkinsBridgePollingService {
         continue;
       }
 
-      syncOneBuild(mapping, number);
+      syncOneBuild(mirroredJob, number);
       handled.add(number);
     }
 
     // Keep syncing builds that are still in progress but already past the watermark.
-    List<BuildMirror> active = mapping.isLegacy()
+    List<BuildMirror> active = mirroredJob.isLegacy()
         ? mirrorStore.getActiveMirrors(job)
-        : mirrorStore.getActiveMirrors(mapping.getTeamCityBuildTypeExternalId(), job);
+        : mirrorStore.getActiveMirrors(mirroredJob.getTeamCityBuildTypeExternalId(), job);
     for (BuildMirror mirror : active) {
       if (handled.contains(mirror.getJenkinsBuildNumber())) {
         continue;
       }
-      syncOneBuild(mapping, mirror.getJenkinsBuildNumber());
+      syncOneBuild(mirroredJob, mirror.getJenkinsBuildNumber());
     }
 
     if (maxNumber > mirrorStore.getLastSeenBuildNumber(keyPrefix)) {
@@ -203,13 +203,13 @@ public class JenkinsBridgePollingService {
   }
 
   // Syncs a single Jenkins build, isolating failures so one bad build does not abort the poll cycle.
-  private void syncOneBuild(JenkinsJobMapping mapping, int buildNumber) {
-    String job = mapping.getJenkinsJob();
+  private void syncOneBuild(MirroredJob mirroredJob, int buildNumber) {
+    String job = mirroredJob.getJenkinsJob();
     BuildMirror mirror = null;
     try {
       JenkinsBuildInfo buildInfo = jenkinsClient.getBuildInfo(job, buildNumber);
-      String mirrorKey = BuildMirrorStore.buildKey(mapping.getMirrorKeyPrefix(), buildNumber);
-      mirror = mirrorStore.getOrCreateMirror(mirrorKey, job, mapping.getTeamCityBuildTypeExternalId(), buildInfo);
+      String mirrorKey = BuildMirrorStore.buildKey(mirroredJob.getMirrorKeyPrefix(), buildNumber);
+      mirror = mirrorStore.getOrCreateMirror(mirrorKey, job, mirroredJob.getTeamCityBuildTypeExternalId(), buildInfo);
       LOG.info("[Jenkins Bridge DEBUG] Syncing Jenkins build " + mirror.getJenkinsBuildKey()
           + " in state " + mirror.getSyncState()
           + " with TeamCity build id " + mirror.getTeamCityBuildId());

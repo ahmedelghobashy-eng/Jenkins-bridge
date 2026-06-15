@@ -2,7 +2,7 @@ package com.jetbrains.teamcity.jenkinsbridge.feature;
 
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettings;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettingsProvider;
-import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsJobMapping;
+import com.jetbrains.teamcity.jenkinsbridge.settings.MirroredJob;
 import jetbrains.buildServer.serverSide.ProjectManager;
 import jetbrains.buildServer.serverSide.SBuildFeatureDescriptor;
 import jetbrains.buildServer.serverSide.SBuildType;
@@ -12,15 +12,15 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Discovers the Jenkins-job mappings to mirror by scanning every active build configuration for the
- * {@link JenkinsBridgeBuildFeature}. When no configuration carries the feature, falls back to a
- * single mapping synthesized from the global settings so the legacy single-job setup keeps working.
+ * Discovers the jobs to mirror by scanning every active build configuration for the
+ * {@link BridgeBuildFeature}. When no configuration carries the feature, falls back to a single
+ * mirrored job synthesized from the global settings so the legacy single-job setup keeps working.
  */
-public class JenkinsBridgeMappingProvider {
+public class MirroredJobProvider {
   private final ProjectManager projectManager;
   private final JenkinsBridgeSettingsProvider settingsProvider;
 
-  public JenkinsBridgeMappingProvider(
+  public MirroredJobProvider(
       ProjectManager projectManager,
       JenkinsBridgeSettingsProvider settingsProvider
   ) {
@@ -28,38 +28,38 @@ public class JenkinsBridgeMappingProvider {
     this.settingsProvider = settingsProvider;
   }
 
-  public List<JenkinsJobMapping> discoverMappings() {
-    List<JenkinsJobMapping> mappings = new ArrayList<JenkinsJobMapping>();
+  public List<MirroredJob> discoverMirroredJobs() {
+    List<MirroredJob> jobs = new ArrayList<MirroredJob>();
     for (SBuildType buildType : projectManager.getActiveBuildTypes()) {
       // isMultipleFeaturesPerBuildTypeAllowed()==false is UI-advisory only; iterate defensively.
       for (SBuildFeatureDescriptor descriptor
-          : buildType.getBuildFeaturesOfType(JenkinsBridgeBuildFeatureConstants.TYPE)) {
-        mappings.add(toMapping(buildType, descriptor));
+          : buildType.getBuildFeaturesOfType(BridgeBuildFeatureConstants.TYPE)) {
+        jobs.add(toMirroredJob(buildType, descriptor));
       }
     }
 
-    if (mappings.isEmpty()) {
-      JenkinsJobMapping legacy = legacyMappingOrNull();
+    if (jobs.isEmpty()) {
+      MirroredJob legacy = legacyJobOrNull();
       if (legacy != null) {
-        mappings.add(legacy);
+        jobs.add(legacy);
       }
     }
-    return mappings;
+    return jobs;
   }
 
-  private JenkinsJobMapping toMapping(SBuildType buildType, SBuildFeatureDescriptor descriptor) {
+  private MirroredJob toMirroredJob(SBuildType buildType, SBuildFeatureDescriptor descriptor) {
     Map<String, String> params = descriptor.getParameters();
-    String job = params.get(JenkinsBridgeBuildFeatureConstants.PARAM_JENKINS_JOB);
-    int limit = parsePositiveInt(params.get(JenkinsBridgeBuildFeatureConstants.PARAM_RECENT_LIMIT));
-    return new JenkinsJobMapping(job, buildType.getExternalId(), buildType.getFullName(), limit, false);
+    String job = params.get(BridgeBuildFeatureConstants.PARAM_JENKINS_JOB);
+    int limit = parsePositiveInt(params.get(BridgeBuildFeatureConstants.PARAM_RECENT_LIMIT));
+    return new MirroredJob(job, buildType.getExternalId(), buildType.getFullName(), limit, false);
   }
 
-  private JenkinsJobMapping legacyMappingOrNull() {
+  private MirroredJob legacyJobOrNull() {
     JenkinsBridgeSettings settings = settingsProvider.load();
     if (!settings.hasMinimumConfiguration()) {
       return null;
     }
-    return JenkinsJobMapping.fromGlobalSettings(settings);
+    return MirroredJob.fromGlobalSettings(settings);
   }
 
   private static int parsePositiveInt(String value) {

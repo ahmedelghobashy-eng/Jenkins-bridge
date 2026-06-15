@@ -36,11 +36,11 @@
   <bean id="buildMirrorStore"
         class="com.jetbrains.teamcity.jenkinsbridge.persistence.BuildMirrorStore"/>
 
-  <bean id="jenkinsBridgeBuildFeature"
-        class="com.jetbrains.teamcity.jenkinsbridge.feature.JenkinsBridgeBuildFeature"/>
+  <bean id="bridgeBuildFeature"
+        class="com.jetbrains.teamcity.jenkinsbridge.feature.BridgeBuildFeature"/>
 
-  <bean id="jenkinsBridgeMappingProvider"
-        class="com.jetbrains.teamcity.jenkinsbridge.feature.JenkinsBridgeMappingProvider"/>
+  <bean id="mirroredJobProvider"
+        class="com.jetbrains.teamcity.jenkinsbridge.feature.MirroredJobProvider"/>
 
   <bean id="teamCityBuildMirrorService"
         class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildMirrorService"/>

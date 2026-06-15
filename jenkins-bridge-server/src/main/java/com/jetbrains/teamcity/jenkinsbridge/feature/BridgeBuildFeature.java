@@ -12,18 +12,18 @@ import java.util.Map;
 /**
  * TeamCity build feature that marks a build configuration as a Jenkins Bridge mirror target. The
  * feature carries the Jenkins job path (the Jenkins server/credentials are global); the hosting
- * build configuration is the mirror target. Discovered by {@link JenkinsBridgeMappingProvider}.
+ * build configuration is the mirror target. Discovered by {@link MirroredJobProvider}.
  */
-public class JenkinsBridgeBuildFeature extends BuildFeature {
+public class BridgeBuildFeature extends BuildFeature {
   private final String editUrl;
 
-  public JenkinsBridgeBuildFeature(PluginDescriptor pluginDescriptor) {
+  public BridgeBuildFeature(PluginDescriptor pluginDescriptor) {
     this.editUrl = pluginDescriptor.getPluginResourcesPath("editJenkinsBridge.jsp");
   }
 
   @Override
   public String getType() {
-    return JenkinsBridgeBuildFeatureConstants.TYPE;
+    return BridgeBuildFeatureConstants.TYPE;
   }
 
   @Override
@@ -54,7 +54,7 @@ public class JenkinsBridgeBuildFeature extends BuildFeature {
 
   @Override
   public String describeParameters(Map<String, String> params) {
-    String job = params.get(JenkinsBridgeBuildFeatureConstants.PARAM_JENKINS_JOB);
+    String job = params.get(BridgeBuildFeatureConstants.PARAM_JENKINS_JOB);
     return isBlank(job) ? "Mirrors a Jenkins job" : "Mirrors Jenkins job '" + job.trim() + "'";
   }
 
@@ -62,13 +62,13 @@ public class JenkinsBridgeBuildFeature extends BuildFeature {
   public PropertiesProcessor getParametersProcessor() {
     return props -> {
       List<InvalidProperty> errors = new ArrayList<InvalidProperty>();
-      if (isBlank(props.get(JenkinsBridgeBuildFeatureConstants.PARAM_JENKINS_JOB))) {
-        errors.add(new InvalidProperty(JenkinsBridgeBuildFeatureConstants.PARAM_JENKINS_JOB,
+      if (isBlank(props.get(BridgeBuildFeatureConstants.PARAM_JENKINS_JOB))) {
+        errors.add(new InvalidProperty(BridgeBuildFeatureConstants.PARAM_JENKINS_JOB,
             "Jenkins job path is required"));
       }
-      String limit = props.get(JenkinsBridgeBuildFeatureConstants.PARAM_RECENT_LIMIT);
+      String limit = props.get(BridgeBuildFeatureConstants.PARAM_RECENT_LIMIT);
       if (!isBlank(limit) && !isPositiveInt(limit)) {
-        errors.add(new InvalidProperty(JenkinsBridgeBuildFeatureConstants.PARAM_RECENT_LIMIT,
+        errors.add(new InvalidProperty(BridgeBuildFeatureConstants.PARAM_RECENT_LIMIT,
             "Recent build limit must be a positive whole number"));
       }
       return errors;

@@ -1,22 +1,23 @@
 package com.jetbrains.teamcity.jenkinsbridge.settings;
 
 /**
- * One Jenkins-job -> TeamCity-build-config mapping the poller should mirror.
+ * One Jenkins job mirrored into a TeamCity build configuration. One {@code MirroredJob} corresponds
+ * to many {@code BuildMirror}s (one per Jenkins build).
  *
- * <p>The Jenkins connection (URL/user/token) is <b>global</b> (see {@link JenkinsBridgeSettings});
- * a mapping only names the Jenkins job and the target TeamCity build config (the config that hosts
- * the Jenkins Bridge build feature). A mapping is either feature-derived or the single legacy
- * fallback synthesized from global settings when no feature exists.
+ * <p>The Jenkins connection (URL/user/token) is <b>global</b> (see {@link JenkinsBridgeSettings}); a
+ * mirrored job only names the Jenkins job and the target TeamCity build config (the config that hosts
+ * the Jenkins Bridge build feature). It is either feature-derived or the single legacy fallback
+ * synthesized from global settings when no feature exists.
  */
-public final class JenkinsJobMapping {
+public final class MirroredJob {
   private final String jenkinsJob;
   private final String teamCityBuildTypeExternalId;
   private final String teamCityBuildTypeName;
-  // 0 means "no per-mapping override; use the global recentBuildLimit".
+  // 0 means "no per-job override; use the global recentBuildLimit".
   private final int recentBuildLimitOverride;
   private final boolean legacy;
 
-  public JenkinsJobMapping(
+  public MirroredJob(
       String jenkinsJob,
       String teamCityBuildTypeExternalId,
       String teamCityBuildTypeName,
@@ -30,9 +31,9 @@ public final class JenkinsJobMapping {
     this.legacy = legacy;
   }
 
-  /** The single legacy mapping derived from global settings (used when no build feature exists). */
-  public static JenkinsJobMapping fromGlobalSettings(JenkinsBridgeSettings settings) {
-    return new JenkinsJobMapping(
+  /** The single legacy mirrored job derived from global settings (used when no build feature exists). */
+  public static MirroredJob fromGlobalSettings(JenkinsBridgeSettings settings) {
+    return new MirroredJob(
         settings.getJenkinsJob(),
         settings.getTeamCityBuildTypeId(),
         settings.getTeamCityBuildTypeId(),
@@ -59,10 +60,10 @@ public final class JenkinsJobMapping {
   }
 
   /**
-   * Prefix that namespaces this mapping's persisted mirrors and its polling watermark.
+   * Prefix that namespaces this job's persisted mirrors and its polling watermark.
    *
-   * <p>Feature mappings use {@code <externalId>::<job>} so two configs mirroring the same Jenkins
-   * job don't collide. The legacy mapping keeps the bare job name to stay byte-compatible with
+   * <p>Feature-derived jobs use {@code <externalId>::<job>} so two configs mirroring the same Jenkins
+   * job don't collide. The legacy job keeps the bare job name to stay byte-compatible with
    * pre-existing on-disk state and the {@code jenkins.build.key} of already-created builds.
    */
   public String getMirrorKeyPrefix() {
@@ -82,7 +83,7 @@ public final class JenkinsJobMapping {
     if (hasMinimumConfiguration()) {
       return "";
     }
-    StringBuilder result = new StringBuilder("Jenkins Bridge mapping is missing configuration:");
+    StringBuilder result = new StringBuilder("Jenkins Bridge job is missing configuration:");
     if (!JenkinsBridgeSettings.isNotBlank(jenkinsJob)) {
       result.append(" jenkinsJob");
     }
@@ -93,7 +94,7 @@ public final class JenkinsJobMapping {
   }
 
   public String describeForLog() {
-    return (legacy ? "legacy" : "feature") + " mapping job=" + jenkinsJob
+    return (legacy ? "legacy" : "feature") + " job " + jenkinsJob
         + " -> buildType=" + teamCityBuildTypeExternalId
         + (recentBuildLimitOverride > 0 ? " (recentBuildLimit=" + recentBuildLimitOverride + ")" : "");
   }

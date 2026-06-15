@@ -13,8 +13,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-public class JenkinsBridgeBuildFeatureTest {
-  private final JenkinsBridgeBuildFeature feature = new JenkinsBridgeBuildFeature(stubPluginDescriptor());
+public class BridgeBuildFeatureTest {
+  private final BridgeBuildFeature feature = new BridgeBuildFeature(stubPluginDescriptor());
 
   @Test
   public void exposesStableTypeAndAgentlessFlags() {
