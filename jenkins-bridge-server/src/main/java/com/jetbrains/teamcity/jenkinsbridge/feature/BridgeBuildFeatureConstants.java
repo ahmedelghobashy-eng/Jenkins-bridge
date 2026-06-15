@@ -11,6 +11,12 @@ public final class BridgeBuildFeatureConstants {
   /** Required. Jenkins job path (folders separated by {@code /}), e.g. {@code team/my-pipeline}. */
   public static final String PARAM_JENKINS_JOB = "jenkinsJob";
 
+  /**
+   * Optional, informational. Absolute Jenkins job URL recorded at import time (e.g. for linking).
+   * The poller does not use it — it reaches Jenkins via the global connection plus the job path.
+   */
+  public static final String PARAM_JENKINS_URL = "jenkinsUrl";
+
   /** Optional. Per-config cold-start backfill depth; blank falls back to the global default. */
   public static final String PARAM_RECENT_LIMIT = "recentBuildLimit";
 

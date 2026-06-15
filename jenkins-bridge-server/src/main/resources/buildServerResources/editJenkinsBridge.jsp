@@ -15,6 +15,13 @@
   </td>
 </tr>
 <tr>
+  <td><label for="<%=BridgeBuildFeatureConstants.PARAM_JENKINS_URL%>">Jenkins job URL:</label></td>
+  <td>
+    <props:textProperty name="<%=BridgeBuildFeatureConstants.PARAM_JENKINS_URL%>" className="longField" maxlength="512"/>
+    <span class="smallNote">Optional, informational (set automatically on import). The poller uses the global Jenkins URL plus the job path.</span>
+  </td>
+</tr>
+<tr>
   <td><label for="<%=BridgeBuildFeatureConstants.PARAM_RECENT_LIMIT%>">Recent build backfill:</label></td>
   <td>
     <props:textProperty name="<%=BridgeBuildFeatureConstants.PARAM_RECENT_LIMIT%>" className="longField" maxlength="8"/>

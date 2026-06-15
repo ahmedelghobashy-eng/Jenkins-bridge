@@ -30,6 +30,9 @@
   <bean id="teamCityTestReporter"
         class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityTestReporter"/>
 
+  <bean id="teamCityStageReporter"
+        class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityStageReporter"/>
+
   <bean id="teamCityBuildFinisher"
         class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildFinisher"/>
 
@@ -41,6 +44,15 @@
 
   <bean id="mirroredJobProvider"
         class="com.jetbrains.teamcity.jenkinsbridge.feature.MirroredJobProvider"/>
+
+  <bean id="jenkinsJobImporter"
+        class="com.jetbrains.teamcity.jenkinsbridge.feature.JenkinsJobImporter"/>
+
+  <bean id="jenkinsBridgeImportController"
+        class="com.jetbrains.teamcity.jenkinsbridge.web.JenkinsBridgeImportController"/>
+
+  <bean id="jenkinsBridgeImportTab"
+        class="com.jetbrains.teamcity.jenkinsbridge.web.JenkinsBridgeImportTab"/>
 
   <bean id="teamCityBuildMirrorService"
         class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildMirrorService"/>

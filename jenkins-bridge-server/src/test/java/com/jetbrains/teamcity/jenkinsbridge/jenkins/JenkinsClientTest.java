@@ -4,6 +4,9 @@ import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpClient;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpException;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpResponse;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsLogChunk;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStageLog;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStageNodes;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStages;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsTestReport;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettings;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettingsProvider;
@@ -122,6 +125,130 @@ public class JenkinsClientTest {
     assertEquals(Arrays.asList(2, 1), numbers);
   }
 
+  @Test
+  public void listJobsBuildsRootUrlWhenFolderBlank() throws Exception {
+    StubResponseHttpClient httpClient = new StubResponseHttpClient();
+    httpClient.body = "{\"jobs\":[]}";
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    client.listJobs("");
+
+    assertEquals("http://jenkins/api/json?tree=jobs%5Bname%2CfullName%2Curl%2C_class%2Cbuildable%2Ccolor%5D",
+        httpClient.url);
+  }
+
+  @Test
+  public void listJobsBuildsFolderUrlAndClassifiesEntries() throws Exception {
+    StubResponseHttpClient httpClient = new StubResponseHttpClient();
+    httpClient.body = "{\"jobs\":["
+        + "{\"name\":\"free\",\"fullName\":\"team/free\",\"_class\":\"hudson.model.FreeStyleProject\"},"
+        + "{\"name\":\"sub\",\"fullName\":\"team/sub\",\"_class\":\"com.cloudbees.hudson.plugins.folder.Folder\"}"
+        + "]}";
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    List<JenkinsJob> jobs = client.listJobs("team");
+
+    assertEquals("http://jenkins/job/team/api/json?tree=jobs%5Bname%2CfullName%2Curl%2C_class%2Cbuildable%2Ccolor%5D",
+        httpClient.url);
+    assertEquals(2, jobs.size());
+    assertEquals("team/free", jobs.get(0).getFullName());
+    assertTrue(jobs.get(0).isImportable());
+    assertFalse(jobs.get(1).isImportable());
+  }
+
+  @Test
+  public void jobUrlBuildsAbsoluteJobPageUrlFromGlobalBase() {
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), new StubResponseHttpClient());
+
+    assertEquals("http://jenkins/job/multi-test/", client.jobUrl("multi-test"));
+    assertEquals("http://jenkins/job/team/job/my-pipeline/", client.jobUrl("team/my-pipeline"));
+  }
+
+  @Test
+  public void getStagesBuildsWfapiUrlAndParsesStages() throws Exception {
+    StubResponseHttpClient httpClient = new StubResponseHttpClient();
+    httpClient.body = "{\"status\":\"IN_PROGRESS\",\"stages\":["
+        + "{\"id\":\"6\",\"name\":\"Build\",\"status\":\"SUCCESS\",\"startTimeMillis\":1000,\"durationMillis\":500},"
+        + "{\"id\":\"12\",\"name\":\"Test\",\"status\":\"IN_PROGRESS\",\"startTimeMillis\":2000,\"durationMillis\":0}"
+        + "]}";
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    JenkinsStages stages = client.getStages("folder/job", 7);
+
+    assertEquals("http://jenkins/job/folder/job/job/7/wfapi/describe", httpClient.url);
+    assertTrue(stages.isPipeline());
+    assertEquals(2, stages.getStages().size());
+    assertEquals("Build", stages.getStages().get(0).getName());
+    assertTrue(stages.getStages().get(0).isTerminal());
+    assertFalse(stages.getStages().get(1).isTerminal());
+  }
+
+  @Test
+  public void getStagesReturnsNotPipelineOn404() throws Exception {
+    NotFoundHttpClient httpClient = new NotFoundHttpClient();
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    JenkinsStages stages = client.getStages("job", 3);
+
+    assertFalse(stages.isPipeline());
+    assertTrue(stages.getStages().isEmpty());
+    assertEquals("http://jenkins/job/job/3/wfapi/describe", httpClient.url);
+  }
+
+  @Test
+  public void getStageNodesParsesStepNodeIdsWithLogLinks() throws Exception {
+    StubResponseHttpClient httpClient = new StubResponseHttpClient();
+    httpClient.body = "{\"stageFlowNodes\":["
+        + "{\"id\":\"7\",\"_links\":{\"log\":{\"href\":\"a\"}}},"
+        + "{\"id\":\"8\",\"_links\":{\"log\":{\"href\":\"b\"}}},"
+        + "{\"id\":\"99\",\"_links\":{\"self\":{\"href\":\"c\"}}}"
+        + "]}";
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    JenkinsStageNodes nodes = client.getStageNodes("folder/job", 7, "6");
+
+    assertEquals("http://jenkins/job/folder/job/job/7/execution/node/6/wfapi/describe", httpClient.url);
+    assertEquals(Arrays.asList("7", "8"), nodes.getLogNodeIds());
+  }
+
+  @Test
+  public void getStageLogConcatenatesStepNodeLogsInOrder() throws Exception {
+    RoutingHttpClient httpClient = new RoutingHttpClient();
+    httpClient.responses.put("/execution/node/6/wfapi/describe",
+        "{\"stageFlowNodes\":[{\"id\":\"7\",\"_links\":{\"log\":{\"href\":\"a\"}}},"
+            + "{\"id\":\"8\",\"_links\":{\"log\":{\"href\":\"b\"}}}]}");
+    httpClient.responses.put("/execution/node/7/wfapi/log", "{\"text\":\"executing step 1\\n\"}");
+    httpClient.responses.put("/execution/node/8/wfapi/log", "{\"text\":\"+ sleep 10\\n\"}");
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    JenkinsStageLog log = client.getStageLog("job", 26, "6");
+
+    assertEquals("executing step 1\n+ sleep 10\n", log.getText());
+  }
+
+  @Test
+  public void getNodeLogStripsConsoleNotes() throws Exception {
+    String esc = "";
+    StubResponseHttpClient httpClient = new StubResponseHttpClient();
+    httpClient.body = "{\"text\":\"" + esc + "[8mha:AAA==" + esc + "[0m+ mvn test\\nok\\n\"}";
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    JenkinsStageLog log = client.getNodeLog("folder/job", 7, "8");
+
+    assertEquals("http://jenkins/job/folder/job/job/7/execution/node/8/wfapi/log", httpClient.url);
+    assertEquals("+ mvn test\nok\n", log.getText());
+  }
+
+  @Test
+  public void getStageLogReturnsEmptyWhenStageNotMaterialized() throws Exception {
+    NotFoundHttpClient httpClient = new NotFoundHttpClient();
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    JenkinsStageLog log = client.getStageLog("job", 3, "9");
+
+    assertEquals("", log.getText());
+  }
+
   private static class StubResponseHttpClient extends BridgeHttpClient {
     private String url;
     private String body = "";
@@ -131,6 +258,29 @@ public class JenkinsClientTest {
     public BridgeHttpResponse getResponse(String url, String user, String password, String accept) {
       this.url = url;
       return new BridgeHttpResponse(200, body, headers);
+    }
+
+    @Override
+    public String get(String url, String user, String password, String accept) {
+      this.url = url;
+      return body;
+    }
+  }
+
+  // Routes each GET to a canned body by matching a URL substring; unmatched URLs 404.
+  private static class RoutingHttpClient extends BridgeHttpClient {
+    private final Map<String, String> responses = new LinkedHashMap<String, String>();
+    private String url;
+
+    @Override
+    public String get(String url, String user, String password, String accept) throws BridgeHttpException {
+      this.url = url;
+      for (Map.Entry<String, String> entry : responses.entrySet()) {
+        if (url.contains(entry.getKey())) {
+          return entry.getValue();
+        }
+      }
+      throw new BridgeHttpException("GET", url, 404, "not found");
     }
   }
 
