@@ -36,14 +36,15 @@ public class BuildMirrorStore {
     this.settingsProvider = settingsProvider;
   }
 
-  public synchronized BuildMirror getOrCreateMirror(String jobName, JenkinsBuildInfo jenkinsInfo) throws IOException {
+  public synchronized BuildMirror getOrCreateMirror(String mirrorKey, String jobName,
+                                                    String teamCityBuildTypeExternalId,
+                                                    JenkinsBuildInfo jenkinsInfo) throws IOException {
     ensureLoaded();
 
-    String key = buildKey(jobName, jenkinsInfo.getNumber());
-    BuildMirror mirror = state.getBuilds().get(key);
+    BuildMirror mirror = state.getBuilds().get(mirrorKey);
     if (mirror == null) {
-      mirror = BuildMirror.create(key, jobName, jenkinsInfo, settings().getTeamCityBuildTypeId(), now());
-      state.getBuilds().put(key, mirror);
+      mirror = BuildMirror.create(mirrorKey, jobName, jenkinsInfo, teamCityBuildTypeExternalId, now());
+      state.getBuilds().put(mirrorKey, mirror);
       saveState();
       return mirror;
     }
@@ -53,8 +54,8 @@ public class BuildMirrorStore {
       mirror.setJenkinsBuildUrl(jenkinsInfo.getUrl());
       changed = true;
     }
-    if (!settings().getTeamCityBuildTypeId().equals(mirror.getTeamCityBuildTypeId())) {
-      mirror.setTeamCityBuildTypeId(settings().getTeamCityBuildTypeId());
+    if (!nullToEmpty(teamCityBuildTypeExternalId).equals(nullToEmpty(mirror.getTeamCityBuildTypeId()))) {
+      mirror.setTeamCityBuildTypeId(teamCityBuildTypeExternalId);
       changed = true;
     }
 
@@ -84,6 +85,25 @@ public class BuildMirrorStore {
     List<BuildMirror> active = new ArrayList<BuildMirror>();
     for (BuildMirror mirror : state.getBuilds().values()) {
       if (jobName.equals(mirror.getJenkinsJob())
+          && mirror.getSyncState() != SyncState.TEAMCITY_FINISHED) {
+        active.add(mirror);
+      }
+    }
+    return active;
+  }
+
+  /**
+   * Returns mirrors for the (target build type, job) pair that have not yet reached
+   * {@code TEAMCITY_FINISHED}. Used by feature-derived mappings so two configs mirroring the same
+   * Jenkins job are tracked independently.
+   */
+  public synchronized List<BuildMirror> getActiveMirrors(String teamCityBuildTypeExternalId, String jobName)
+      throws IOException {
+    ensureLoaded();
+    List<BuildMirror> active = new ArrayList<BuildMirror>();
+    for (BuildMirror mirror : state.getBuilds().values()) {
+      if (jobName.equals(mirror.getJenkinsJob())
+          && teamCityBuildTypeExternalId.equals(mirror.getTeamCityBuildTypeId())
           && mirror.getSyncState() != SyncState.TEAMCITY_FINISHED) {
         active.add(mirror);
       }

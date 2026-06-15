@@ -72,6 +72,33 @@ public class JenkinsClientTest {
   }
 
   @Test
+  public void progressiveLogStripsJenkinsConsoleNotes() throws Exception {
+    String esc = "";
+    StubResponseHttpClient httpClient = new StubResponseHttpClient();
+    httpClient.body = esc + "[8mha:////AAAA==" + esc + "[0m[Pipeline] Start of Pipeline\nplain line\n";
+    httpClient.headers.put("X-Text-Size", "5000");
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    JenkinsLogChunk chunk = client.getProgressiveLog("job", 7, 100);
+
+    // Console note removed; visible text kept; offset still driven by X-Text-Size (raw byte size).
+    assertEquals("[Pipeline] Start of Pipeline\nplain line\n", chunk.getText());
+    assertEquals(5000L, chunk.getNextStart());
+  }
+
+  @Test
+  public void stripConsoleNotesRemovesConcealBlocksAcrossLines() {
+    String esc = "";
+    String input = esc + "[8mha:AAA==" + esc + "[0mStarted by user Ahmed\n"
+        + esc + "[8mha:BBB==" + esc + "[0m[Pipeline] node\n";
+
+    assertEquals("Started by user Ahmed\n[Pipeline] node\n", JenkinsClient.stripConsoleNotes(input));
+    assertEquals("plain text", JenkinsClient.stripConsoleNotes("plain text"));
+    assertEquals("", JenkinsClient.stripConsoleNotes(""));
+    assertEquals("", JenkinsClient.stripConsoleNotes(null));
+  }
+
+  @Test
   public void getBuildNumbersUsesBuildsTreeAndParsesNumbers() throws Exception {
     StubResponseHttpClient httpClient = new StubResponseHttpClient();
     httpClient.body = "{\"builds\":[{\"number\":50},{\"number\":49},{\"number\":48}]}";
