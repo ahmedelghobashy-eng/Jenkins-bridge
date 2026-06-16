@@ -3,6 +3,8 @@ package com.jetbrains.teamcity.jenkinsbridge.jenkins;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpClient;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpException;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpResponse;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsCrumb;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsJobParameters;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsLogChunk;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStageLog;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStageNodes;
@@ -249,6 +251,87 @@ public class JenkinsClientTest {
     assertEquals("", log.getText());
   }
 
+  @Test
+  public void getCrumbParsesFieldAndValue() throws Exception {
+    StubResponseHttpClient httpClient = new StubResponseHttpClient();
+    httpClient.body = "{\"crumbRequestField\":\"Jenkins-Crumb\",\"crumb\":\"abc123\"}";
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    JenkinsCrumb crumb = client.getCrumb();
+
+    assertEquals("http://jenkins/crumbIssuer/api/json", httpClient.url);
+    assertTrue(crumb.isPresent());
+    assertEquals("Jenkins-Crumb", crumb.getField());
+    assertEquals("abc123", crumb.getValue());
+  }
+
+  @Test
+  public void getCrumbReturnsDisabledOn404() throws Exception {
+    NotFoundHttpClient httpClient = new NotFoundHttpClient();
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    assertFalse(client.getCrumb().isPresent());
+  }
+
+  @Test
+  public void getJobParametersParsesDefinitions() throws Exception {
+    StubResponseHttpClient httpClient = new StubResponseHttpClient();
+    httpClient.body = "{\"property\":[{\"parameterDefinitions\":["
+        + "{\"name\":\"BRANCH\",\"type\":\"StringParameterDefinition\",\"defaultParameterValue\":{\"value\":\"main\"}},"
+        + "{\"name\":\"ENV\",\"type\":\"ChoiceParameterDefinition\",\"defaultParameterValue\":{\"value\":\"dev\"},\"choices\":[\"dev\",\"prod\"]}"
+        + "]}]}";
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    JenkinsJobParameters params = client.getJobParameters("folder/job");
+
+    assertEquals("http://jenkins/job/folder/job/job/api/json?tree=property%5BparameterDefinitions%5Bname%2Ctype%2CdefaultParameterValue%5Bvalue%5D%2Cchoices%5D%5D", httpClient.url);
+    assertTrue(params.isParameterized());
+    assertEquals(2, params.getParameters().size());
+    assertEquals("BRANCH", params.getParameters().get(0).getName());
+    assertEquals("main", params.getParameters().get(0).getDefaultValue());
+    assertEquals(Arrays.asList("dev", "prod"), params.getParameters().get(1).getChoices());
+  }
+
+  @Test
+  public void triggerBuildWithParametersPostsFormAndAttachesCrumb() throws Exception {
+    TriggerHttpClient httpClient = new TriggerHttpClient();
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    Map<String, String> values = new LinkedHashMap<String, String>();
+    values.put("BRANCH", "feature/x");
+    values.put("DEPLOY", "true");
+
+    String queueUrl = client.triggerBuild("folder/job", values);
+
+    assertEquals("http://jenkins/job/folder/job/job/buildWithParameters", httpClient.postUrl);
+    assertEquals("BRANCH=feature%2Fx&DEPLOY=true", httpClient.postBody);
+    assertEquals("abc123", httpClient.postHeaders.get("Jenkins-Crumb"));
+    assertEquals("http://jenkins/queue/item/42/", queueUrl);
+  }
+
+  @Test
+  public void triggerBuildWithoutParametersUsesBuildEndpoint() throws Exception {
+    TriggerHttpClient httpClient = new TriggerHttpClient();
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    String queueUrl = client.triggerBuild("job", new LinkedHashMap<String, String>());
+
+    assertEquals("http://jenkins/job/job/build", httpClient.postUrl);
+    assertEquals("", httpClient.postBody);
+    assertEquals("http://jenkins/queue/item/42/", queueUrl);
+  }
+
+  @Test
+  public void triggerBuildOmitsCrumbHeaderWhenDisabled() throws Exception {
+    TriggerHttpClient httpClient = new TriggerHttpClient();
+    httpClient.crumbDisabled = true;
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    client.triggerBuild("job", new LinkedHashMap<String, String>());
+
+    assertTrue(httpClient.postHeaders.isEmpty());
+  }
+
   private static class StubResponseHttpClient extends BridgeHttpClient {
     private String url;
     private String body = "";
@@ -264,6 +347,36 @@ public class JenkinsClientTest {
     public String get(String url, String user, String password, String accept) {
       this.url = url;
       return body;
+    }
+  }
+
+  // Serves the crumb on GET and captures the trigger POST, returning a 201 + Location header.
+  private static class TriggerHttpClient extends BridgeHttpClient {
+    boolean crumbDisabled = false;
+    String postUrl;
+    String postBody;
+    Map<String, String> postHeaders;
+
+    @Override
+    public String get(String url, String user, String password, String accept) throws BridgeHttpException {
+      if (url.contains("/crumbIssuer/")) {
+        if (crumbDisabled) {
+          throw new BridgeHttpException("GET", url, 404, "no crumb");
+        }
+        return "{\"crumbRequestField\":\"Jenkins-Crumb\",\"crumb\":\"abc123\"}";
+      }
+      return "{}";
+    }
+
+    @Override
+    public BridgeHttpResponse postResponse(String url, String user, String password, String body,
+                                           String contentType, String accept, Map<String, String> headers) {
+      this.postUrl = url;
+      this.postBody = body;
+      this.postHeaders = headers;
+      Map<String, String> responseHeaders = new LinkedHashMap<String, String>();
+      responseHeaders.put("Location", "http://jenkins/queue/item/42/");
+      return new BridgeHttpResponse(201, "", responseHeaders);
     }
   }
 

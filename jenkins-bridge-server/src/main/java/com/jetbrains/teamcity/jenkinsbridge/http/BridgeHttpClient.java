@@ -19,15 +19,25 @@ public class BridgeHttpClient {
   }
 
   public BridgeHttpResponse getResponse(String url, String user, String password, String accept) throws BridgeHttpException {
-    return request("GET", url, user, password, null, null, accept);
+    return request("GET", url, user, password, null, null, accept, null);
   }
 
   public String post(String url, String user, String password, String body, String contentType, String accept) throws BridgeHttpException {
-    return request("POST", url, user, password, body, contentType, accept).getBody();
+    return request("POST", url, user, password, body, contentType, accept, null).getBody();
+  }
+
+  /**
+   * POST returning the full response (status + headers), with optional extra request headers (e.g. a
+   * Jenkins CSRF crumb). Used by the trigger flow, which needs the {@code Location} response header.
+   */
+  public BridgeHttpResponse postResponse(
+      String url, String user, String password, String body, String contentType, String accept,
+      Map<String, String> headers) throws BridgeHttpException {
+    return request("POST", url, user, password, body, contentType, accept, headers);
   }
 
   public String put(String url, String user, String password, String body, String contentType, String accept) throws BridgeHttpException {
-    return request("PUT", url, user, password, body, contentType, accept).getBody();
+    return request("PUT", url, user, password, body, contentType, accept, null).getBody();
   }
 
   private BridgeHttpResponse request(
@@ -37,7 +47,8 @@ public class BridgeHttpClient {
       String password,
       String body,
       String contentType,
-      String accept
+      String accept,
+      Map<String, String> headers
   ) throws BridgeHttpException {
     HttpURLConnection connection = null;
 
@@ -55,6 +66,14 @@ public class BridgeHttpClient {
 
       if (isNotBlank(accept)) {
         connection.setRequestProperty("Accept", accept);
+      }
+
+      if (headers != null) {
+        for (Map.Entry<String, String> header : headers.entrySet()) {
+          if (header.getKey() != null && header.getValue() != null) {
+            connection.setRequestProperty(header.getKey(), header.getValue());
+          }
+        }
       }
 
       if (body != null) {

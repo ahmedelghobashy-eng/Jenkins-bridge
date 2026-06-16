@@ -8,6 +8,8 @@ import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpClient;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpException;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpResponse;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsCrumb;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsJobParameters;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsLogChunk;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStageLog;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStageNodes;
@@ -19,7 +21,9 @@ import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettingsProvid
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 public class JenkinsClient {
@@ -294,6 +298,91 @@ public class JenkinsClient {
       }
       throw e;
     }
+  }
+
+  /**
+   * Reads the build parameters a Jenkins job declares. Empty for a non-parameterized job (or a
+   * {@code 404}). Drives the TeamCity trigger form and validates which values are accepted.
+   */
+  public JenkinsJobParameters getJobParameters(String jobName) throws BridgeHttpException {
+    JenkinsBridgeSettings settings = settingsProvider.load();
+    String tree = "property[parameterDefinitions[name,type,defaultParameterValue[value],choices]]";
+    String url = settings.getJenkinsUrl()
+        + jenkinsJobPath(jobName)
+        + "/api/json?tree="
+        + encodeQueryValue(tree);
+
+    try {
+      String response = httpClient.get(url, settings.getJenkinsUser(), settings.getJenkinsToken(), "application/json");
+      return JenkinsJobParameters.fromJson(jsonParser.parse(response).getAsJsonObject());
+    } catch (BridgeHttpException e) {
+      if (e.getStatusCode() == 404) {
+        return JenkinsJobParameters.empty();
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Fetches a Jenkins CSRF crumb. A {@code 404} means crumb protection is disabled, in which case
+   * {@link JenkinsCrumb#disabled()} is returned and no crumb header is sent on the trigger POST.
+   */
+  public JenkinsCrumb getCrumb() throws BridgeHttpException {
+    JenkinsBridgeSettings settings = settingsProvider.load();
+    String url = settings.getJenkinsUrl() + "/crumbIssuer/api/json";
+    try {
+      String response = httpClient.get(url, settings.getJenkinsUser(), settings.getJenkinsToken(), "application/json");
+      return JenkinsCrumb.fromJson(jsonParser.parse(response).getAsJsonObject());
+    } catch (BridgeHttpException e) {
+      if (e.getStatusCode() == 404) {
+        return JenkinsCrumb.disabled();
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Triggers a Jenkins build. With parameters it POSTs to {@code buildWithParameters}; without, to
+   * {@code build}. Attaches a CSRF crumb when the controller requires one. Returns the queue-item
+   * URL from the {@code Location} response header (empty if absent), which the caller can poll until
+   * Jenkins assigns a build number.
+   */
+  public String triggerBuild(String jobName, Map<String, String> parameters) throws BridgeHttpException {
+    JenkinsBridgeSettings settings = settingsProvider.load();
+    boolean parameterized = parameters != null && !parameters.isEmpty();
+
+    String url = settings.getJenkinsUrl()
+        + jenkinsJobPath(jobName)
+        + "/"
+        + (parameterized ? "buildWithParameters" : "build");
+
+    String body = parameterized ? encodeForm(parameters) : "";
+
+    Map<String, String> headers = new LinkedHashMap<String, String>();
+    JenkinsCrumb crumb = getCrumb();
+    if (crumb.isPresent()) {
+      headers.put(crumb.getField(), crumb.getValue());
+    }
+
+    BridgeHttpResponse response = httpClient.postResponse(
+        url, settings.getJenkinsUser(), settings.getJenkinsToken(),
+        body, "application/x-www-form-urlencoded", "application/json", headers);
+
+    String location = response.getHeader("Location");
+    return location == null ? "" : location;
+  }
+
+  private static String encodeForm(Map<String, String> parameters) {
+    StringBuilder body = new StringBuilder();
+    for (Map.Entry<String, String> entry : parameters.entrySet()) {
+      if (body.length() > 0) {
+        body.append('&');
+      }
+      body.append(encodeQueryValue(entry.getKey()))
+          .append('=')
+          .append(encodeQueryValue(entry.getValue() == null ? "" : entry.getValue()));
+    }
+    return body.toString();
   }
 
   private String jenkinsJobPath(String jobName) {
