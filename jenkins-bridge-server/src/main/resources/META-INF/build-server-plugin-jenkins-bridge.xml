@@ -54,6 +54,12 @@
   <bean id="jenkinsBridgeImportTab"
         class="com.jetbrains.teamcity.jenkinsbridge.web.JenkinsBridgeImportTab"/>
 
+  <bean id="jenkinsTriggerController"
+        class="com.jetbrains.teamcity.jenkinsbridge.web.JenkinsTriggerController"/>
+
+  <bean id="jenkinsTriggerTab"
+        class="com.jetbrains.teamcity.jenkinsbridge.web.JenkinsTriggerTab"/>
+
   <bean id="teamCityBuildMirrorService"
         class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildMirrorService"/>
 
