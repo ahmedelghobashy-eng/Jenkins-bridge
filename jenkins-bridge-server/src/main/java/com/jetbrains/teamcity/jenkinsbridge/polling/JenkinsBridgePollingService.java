@@ -7,6 +7,7 @@ import com.jetbrains.teamcity.jenkinsbridge.persistence.BuildMirrorStore;
 import com.jetbrains.teamcity.jenkinsbridge.persistence.SyncState;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsLogChunk;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStages;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsTestReport;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettings;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettingsProvider;
@@ -230,13 +231,36 @@ public class JenkinsBridgePollingService {
     mirrorService.ensureRunningDataSent(mirror, teamCityBuildId);
     mirrorService.ensureMetadataLogSent(mirror, teamCityBuildId);
 
-    long start = Math.max(0L, mirror.getLastLogOffset());
-    JenkinsLogChunk logChunk = jenkinsClient.getProgressiveLog(
-        mirror.getJenkinsJob(), mirror.getJenkinsBuildNumber(), start);
-    LOG.info("[Jenkins Bridge DEBUG] Fetched " + logChunk.getText().length()
-        + " new console character(s) for " + mirror.getJenkinsBuildKey()
-        + " from byte offset " + start + " (nextStart=" + logChunk.getNextStart() + ")");
-    mirrorService.syncLogs(mirror, teamCityBuildId, logChunk);
+    // Decide once whether this build is a Jenkins Pipeline (mirror stages as build steps) or a
+    // freestyle build (mirror the flat progressive console log). The decision is sticky per build.
+    Boolean pipelineMode = mirror.getPipelineMode();
+    JenkinsStages stages = null;
+    if (pipelineMode == null) {
+      stages = jenkinsClient.getStages(mirror.getJenkinsJob(), mirror.getJenkinsBuildNumber());
+      pipelineMode = stages.isPipeline();
+      mirror.setPipelineMode(pipelineMode);
+      // Persist the decision now so a freestyle poll with no new log does not re-probe wfapi forever.
+      mirrorStore.saveMirror(mirror);
+      LOG.info("[Jenkins Bridge DEBUG] " + mirror.getJenkinsBuildKey()
+          + " pipelineMode=" + pipelineMode);
+    }
+
+    if (pipelineMode) {
+      if (stages == null) {
+        stages = jenkinsClient.getStages(mirror.getJenkinsJob(), mirror.getJenkinsBuildNumber());
+      }
+      LOG.info("[Jenkins Bridge DEBUG] Syncing " + stages.getStages().size()
+          + " Pipeline stage(s) for " + mirror.getJenkinsBuildKey());
+      mirrorService.syncStages(mirror, teamCityBuildId, stages, jenkinsClient);
+    } else {
+      long start = Math.max(0L, mirror.getLastLogOffset());
+      JenkinsLogChunk logChunk = jenkinsClient.getProgressiveLog(
+          mirror.getJenkinsJob(), mirror.getJenkinsBuildNumber(), start);
+      LOG.info("[Jenkins Bridge DEBUG] Fetched " + logChunk.getText().length()
+          + " new console character(s) for " + mirror.getJenkinsBuildKey()
+          + " from byte offset " + start + " (nextStart=" + logChunk.getNextStart() + ")");
+      mirrorService.syncLogs(mirror, teamCityBuildId, logChunk);
+    }
 
     if (!buildInfo.isBuilding()
         && !mirror.isTestsSynced()

@@ -3,6 +3,9 @@ package com.jetbrains.teamcity.jenkinsbridge.persistence;
 import com.google.gson.annotations.SerializedName;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /**
  * Per-build mirror record: correlates one Jenkins build with its TeamCity build and tracks how far
  * the sync has progressed. One instance per Jenkins build; persisted in {@link BridgeState}.
@@ -19,6 +22,11 @@ public class BuildMirror {
   private SyncState syncState;
   // Byte offset into the Jenkins console log already mirrored (Jenkins progressive-log X-Text-Size).
   private long lastLogOffset;
+  // null = not yet determined; true = Jenkins Pipeline (mirror stages as build steps, skip flat log);
+  // false = freestyle (mirror the flat progressive console log). Decided once, never flipped.
+  private Boolean pipelineMode;
+  // Per-stage watermarks, keyed by Jenkins stage id; only populated for Pipeline builds.
+  private Map<String, StageMirror> stages;
   private boolean metadataLogSent;
   private boolean summaryLogSent;
   private boolean testsSynced;
@@ -101,6 +109,21 @@ public class BuildMirror {
 
   public void setLastLogOffset(long lastLogOffset) {
     this.lastLogOffset = lastLogOffset;
+  }
+
+  public Boolean getPipelineMode() {
+    return pipelineMode;
+  }
+
+  public void setPipelineMode(Boolean pipelineMode) {
+    this.pipelineMode = pipelineMode;
+  }
+
+  public Map<String, StageMirror> getStages() {
+    if (stages == null) {
+      stages = new LinkedHashMap<String, StageMirror>();
+    }
+    return stages;
   }
 
   public boolean isMetadataLogSent() {

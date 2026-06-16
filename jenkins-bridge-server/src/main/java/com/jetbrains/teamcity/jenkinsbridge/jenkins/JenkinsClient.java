@@ -9,6 +9,9 @@ import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpException;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpResponse;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsLogChunk;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStageLog;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStageNodes;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStages;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsTestReport;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettings;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettingsProvider;
@@ -160,6 +163,134 @@ public class JenkinsClient {
     } catch (BridgeHttpException e) {
       if (e.getStatusCode() == 404) {
         return JenkinsTestReport.empty();
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Lists the top-level jobs at {@code folderPath} (blank = Jenkins root). Does not recurse into
+   * folders or expand multibranch projects; folder/multibranch entries are returned but marked
+   * non-importable. Reuses the global Jenkins connection.
+   */
+  public List<JenkinsJob> listJobs(String folderPath) throws BridgeHttpException {
+    JenkinsBridgeSettings settings = settingsProvider.load();
+    String tree = "jobs[name,fullName,url,_class,buildable,color]";
+    String url = settings.getJenkinsUrl()
+        + jenkinsJobPath(folderPath == null ? "" : folderPath)
+        + "/api/json?tree="
+        + encodeQueryValue(tree);
+
+    String response = httpClient.get(url, settings.getJenkinsUser(), settings.getJenkinsToken(), "application/json");
+    JsonObject root = jsonParser.parse(response).getAsJsonObject();
+    JsonArray jobs = root.getAsJsonArray("jobs");
+    List<JenkinsJob> result = new ArrayList<JenkinsJob>();
+    if (jobs == null) {
+      return result;
+    }
+    for (JsonElement element : jobs) {
+      if (element != null && element.isJsonObject()) {
+        result.add(JenkinsJob.fromJson(element.getAsJsonObject()));
+      }
+    }
+    return result;
+  }
+
+  /** Absolute Jenkins job page URL for {@code fullName}, derived from the global base URL. */
+  public String jobUrl(String fullName) {
+    return settingsProvider.load().getJenkinsUrl()
+        + jenkinsJobPath(fullName == null ? "" : fullName)
+        + "/";
+  }
+
+  /**
+   * Fetches the Pipeline stage list via Jenkins' {@code wfapi/describe} (Pipeline Stage View
+   * plugin). A {@code 404} means the build is not a Pipeline, or the plugin is absent: callers
+   * fall back to the flat console log.
+   */
+  public JenkinsStages getStages(String jobName, int buildNumber) throws BridgeHttpException {
+    JenkinsBridgeSettings settings = settingsProvider.load();
+    String url = settings.getJenkinsUrl()
+        + jenkinsJobPath(jobName)
+        + "/"
+        + buildNumber
+        + "/wfapi/describe";
+
+    try {
+      String response = httpClient.get(url, settings.getJenkinsUser(), settings.getJenkinsToken(), "application/json");
+      return JenkinsStages.fromJson(jsonParser.parse(response).getAsJsonObject());
+    } catch (BridgeHttpException e) {
+      if (e.getStatusCode() == 404) {
+        return JenkinsStages.notPipeline();
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Fetches the console text of one Pipeline stage. The stage node itself carries no log, so this
+   * descends into the stage's {@code stageFlowNodes} (echo / sh / etc. steps) and concatenates each
+   * step node's log in flow order. ConsoleNote annotations are stripped, same as the progressive log.
+   */
+  public JenkinsStageLog getStageLog(String jobName, int buildNumber, String stageId) throws BridgeHttpException {
+    JenkinsStageNodes nodes = getStageNodes(jobName, buildNumber, stageId);
+    if (nodes.getLogNodeIds().isEmpty()) {
+      return JenkinsStageLog.empty();
+    }
+
+    StringBuilder text = new StringBuilder();
+    for (String nodeId : nodes.getLogNodeIds()) {
+      text.append(getNodeLog(jobName, buildNumber, nodeId).getText());
+    }
+    return JenkinsStageLog.of(text.toString());
+  }
+
+  /**
+   * Fetches the step nodes of a stage via {@code execution/node/<stageId>/wfapi/describe}. A
+   * {@code 404} (stage not yet materialized) yields no nodes.
+   */
+  JenkinsStageNodes getStageNodes(String jobName, int buildNumber, String stageId) throws BridgeHttpException {
+    JenkinsBridgeSettings settings = settingsProvider.load();
+    String url = settings.getJenkinsUrl()
+        + jenkinsJobPath(jobName)
+        + "/"
+        + buildNumber
+        + "/execution/node/"
+        + encodePathSegment(stageId)
+        + "/wfapi/describe";
+
+    try {
+      String response = httpClient.get(url, settings.getJenkinsUser(), settings.getJenkinsToken(), "application/json");
+      return JenkinsStageNodes.fromJson(jsonParser.parse(response).getAsJsonObject());
+    } catch (BridgeHttpException e) {
+      if (e.getStatusCode() == 404) {
+        return JenkinsStageNodes.empty();
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Fetches one flow node's console text via {@code execution/node/<id>/wfapi/log}, with Jenkins
+   * ConsoleNote annotations stripped. A {@code 404} (node not yet materialized) yields empty text.
+   */
+  JenkinsStageLog getNodeLog(String jobName, int buildNumber, String nodeId) throws BridgeHttpException {
+    JenkinsBridgeSettings settings = settingsProvider.load();
+    String url = settings.getJenkinsUrl()
+        + jenkinsJobPath(jobName)
+        + "/"
+        + buildNumber
+        + "/execution/node/"
+        + encodePathSegment(nodeId)
+        + "/wfapi/log";
+
+    try {
+      String response = httpClient.get(url, settings.getJenkinsUser(), settings.getJenkinsToken(), "application/json");
+      JenkinsStageLog log = JenkinsStageLog.fromJson(jsonParser.parse(response).getAsJsonObject());
+      return JenkinsStageLog.of(stripConsoleNotes(log.getText()));
+    } catch (BridgeHttpException e) {
+      if (e.getStatusCode() == 404) {
+        return JenkinsStageLog.empty();
       }
       throw e;
     }
