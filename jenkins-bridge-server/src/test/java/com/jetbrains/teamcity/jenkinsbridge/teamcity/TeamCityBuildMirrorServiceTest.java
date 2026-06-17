@@ -24,7 +24,7 @@ public class TeamCityBuildMirrorServiceTest {
     CapturingStageReporter reporter = new CapturingStageReporter();
     FakeStageLogClient client = new FakeStageLogClient();
     TeamCityBuildMirrorService service = new TeamCityBuildMirrorService(
-        null, null, null, null, null, null, reporter, null, new NoopStore());
+        null, null, null, null, null, null, reporter, null, null, new NoopStore());
 
     BuildMirror mirror = new BuildMirror();
 
@@ -53,6 +53,11 @@ public class TeamCityBuildMirrorServiceTest {
     service.syncStages(mirror, 1L, stages("Build", "SUCCESS", 1000, 500), client);
     assertEquals(2, reporter.reports.size());
     assertEquals(21L, mirror.getStages().get("6").getLogOffset());
+  }
+
+  @Test
+  public void skippedPipelineNodeFinishesRedWithoutBeingCanceled() {
+    assertEquals("FAILURE", TeamCityBuildMirrorService.jenkinsResultForPipelineNodeStatus("NOT_EXECUTED"));
   }
 
   private JenkinsStages stages(String name, String status, long start, long duration) {

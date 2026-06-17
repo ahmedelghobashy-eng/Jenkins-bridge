@@ -1,0 +1,90 @@
+package com.jetbrains.teamcity.jenkinsbridge.model;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+public class JenkinsPipelineGraphNode {
+  private String id;
+  private String flowId;
+  private String name;
+  private String status;
+  private long startTimeMillis;
+  private long durationMillis;
+  private List<String> parentIds;
+  private List<String> childIds;
+  private List<String> logNodeIds;
+
+  // Gson needs a no-arg constructor.
+  public JenkinsPipelineGraphNode() {
+  }
+
+  public JenkinsPipelineGraphNode(
+      String id,
+      String flowId,
+      String name,
+      String status,
+      long startTimeMillis,
+      long durationMillis,
+      List<String> parentIds,
+      List<String> childIds,
+      List<String> logNodeIds
+  ) {
+    this.id = nullToEmpty(id);
+    this.flowId = nullToEmpty(flowId);
+    this.name = nullToEmpty(name);
+    this.status = nullToEmpty(status);
+    this.startTimeMillis = startTimeMillis;
+    this.durationMillis = durationMillis;
+    this.parentIds = copy(parentIds);
+    this.childIds = copy(childIds);
+    this.logNodeIds = copy(logNodeIds);
+  }
+
+  public String getId() {
+    return nullToEmpty(id);
+  }
+
+  public String getFlowId() {
+    return nullToEmpty(flowId);
+  }
+
+  public String getName() {
+    return nullToEmpty(name);
+  }
+
+  public String getStatus() {
+    return nullToEmpty(status);
+  }
+
+  public long getStartTimeMillis() {
+    return startTimeMillis;
+  }
+
+  public long getDurationMillis() {
+    return durationMillis;
+  }
+
+  public List<String> getParentIds() {
+    return parentIds == null ? Collections.<String>emptyList() : Collections.unmodifiableList(parentIds);
+  }
+
+  public List<String> getChildIds() {
+    return childIds == null ? Collections.<String>emptyList() : Collections.unmodifiableList(childIds);
+  }
+
+  public List<String> getLogNodeIds() {
+    return logNodeIds == null ? Collections.<String>emptyList() : Collections.unmodifiableList(logNodeIds);
+  }
+
+  private static List<String> copy(List<String> values) {
+    if (values == null || values.isEmpty()) {
+      return new ArrayList<String>();
+    }
+    return new ArrayList<String>(values);
+  }
+
+  private static String nullToEmpty(String value) {
+    return value == null ? "" : value;
+  }
+}

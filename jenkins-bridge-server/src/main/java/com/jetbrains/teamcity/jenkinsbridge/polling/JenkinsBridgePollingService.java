@@ -7,6 +7,7 @@ import com.jetbrains.teamcity.jenkinsbridge.persistence.BuildMirrorStore;
 import com.jetbrains.teamcity.jenkinsbridge.persistence.SyncState;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsLogChunk;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsPipelineGraph;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStages;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsTestReport;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettings;
@@ -227,14 +228,11 @@ public class JenkinsBridgePollingService {
   }
 
   private void syncBuild(BuildMirror mirror, JenkinsBuildInfo buildInfo) throws Exception {
-    long teamCityBuildId = mirrorService.ensureTeamCityBuild(mirror, buildInfo);
-    mirrorService.ensureRunningDataSent(mirror, teamCityBuildId);
-    mirrorService.ensureMetadataLogSent(mirror, teamCityBuildId);
-
     // Decide once whether this build is a Jenkins Pipeline (mirror stages as build steps) or a
     // freestyle build (mirror the flat progressive console log). The decision is sticky per build.
     Boolean pipelineMode = mirror.getPipelineMode();
     JenkinsStages stages = null;
+    JenkinsPipelineGraph graph = null;
     if (pipelineMode == null) {
       stages = jenkinsClient.getStages(mirror.getJenkinsJob(), mirror.getJenkinsBuildNumber());
       pipelineMode = stages.isPipeline();
@@ -246,9 +244,31 @@ public class JenkinsBridgePollingService {
     }
 
     if (pipelineMode) {
+      graph = jenkinsClient.getPipelineGraph(
+          mirror.getJenkinsJob(), mirror.getJenkinsBuildNumber(), mirror.getJenkinsBuildKey());
+      LOG.info("[Jenkins Bridge DEBUG] Pipeline graph for " + mirror.getJenkinsBuildKey()
+          + " has source " + graph.getSource()
+          + ", confidence " + graph.getConfidence()
+          + ", " + graph.getNodes().size() + " node(s), topologyHash=" + graph.getTopologyHash());
+      if (buildInfo.isBuilding() && mirror.getTeamCityBuildId() == null) {
+        mirror.setPipelineGraph(graph);
+        mirrorStore.saveMirror(mirror);
+        LOG.info("[Jenkins Bridge DEBUG] Delaying native Pipeline chain creation for "
+            + mirror.getJenkinsBuildKey()
+            + " until Jenkins finishes so the WFAPI graph is complete");
+        return;
+      }
+    }
+
+    long teamCityBuildId = mirrorService.ensureTeamCityBuild(mirror, buildInfo, graph);
+    mirrorService.ensureRunningDataSent(mirror, teamCityBuildId);
+    mirrorService.ensureMetadataLogSent(mirror, teamCityBuildId);
+
+    if (pipelineMode) {
       if (stages == null) {
         stages = jenkinsClient.getStages(mirror.getJenkinsJob(), mirror.getJenkinsBuildNumber());
       }
+      mirrorService.syncPipelineGraph(mirror, teamCityBuildId, graph);
       LOG.info("[Jenkins Bridge DEBUG] Syncing " + stages.getStages().size()
           + " Pipeline stage(s) for " + mirror.getJenkinsBuildKey());
       mirrorService.syncStages(mirror, teamCityBuildId, stages, jenkinsClient);

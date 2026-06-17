@@ -7,23 +7,34 @@ import com.google.gson.JsonParser;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpClient;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpException;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpResponse;
+import com.jetbrains.teamcity.jenkinsbridge.model.GraphConfidence;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsCrumb;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsJobParameters;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsLogChunk;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsPipelineGraph;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsPipelineGraphNode;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStage;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStageLog;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStageNodes;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStages;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsWfapiNode;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsTestReport;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettings;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettingsProvider;
 
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 public class JenkinsClient {
@@ -231,6 +242,292 @@ public class JenkinsClient {
     }
   }
 
+  public JenkinsPipelineGraph getPipelineGraph(String jobName, int buildNumber) throws BridgeHttpException {
+    return getPipelineGraph(jobName, buildNumber, jobName + "#" + buildNumber);
+  }
+
+  public JenkinsPipelineGraph getPipelineGraph(String jobName, int buildNumber, String flowIdPrefix)
+      throws BridgeHttpException {
+    JenkinsPipelineGraph blueOceanGraph = getBlueOceanPipelineGraph(jobName, buildNumber, flowIdPrefix);
+    if (isUsableForNativeChain(blueOceanGraph)) {
+      return blueOceanGraph;
+    }
+
+    JenkinsPipelineGraph wfapiGraph = getWfapiPipelineGraph(
+        jobName, buildNumber, flowIdPrefix, blueOceanGraph.getDiagnostics());
+    return wfapiGraph.isPipeline() ? wfapiGraph : blueOceanGraph;
+  }
+
+  private boolean isUsableForNativeChain(JenkinsPipelineGraph graph) {
+    return graph != null
+        && graph.isPipeline()
+        && graph.getConfidence() == GraphConfidence.EXPLICIT;
+  }
+
+  private JenkinsPipelineGraph getWfapiPipelineGraph(
+      String jobName,
+      int buildNumber,
+      String flowIdPrefix,
+      List<String> previousDiagnostics
+  ) throws BridgeHttpException {
+    JenkinsBridgeSettings settings = settingsProvider.load();
+    String url = settings.getJenkinsUrl()
+        + jenkinsJobPath(jobName)
+        + "/"
+        + buildNumber
+        + "/wfapi/describe";
+
+    List<String> diagnostics = new ArrayList<String>();
+    if (previousDiagnostics != null) {
+      diagnostics.addAll(previousDiagnostics);
+    }
+    JsonObject root;
+    JenkinsStages stages;
+    try {
+      String response = httpClient.get(url, settings.getJenkinsUser(), settings.getJenkinsToken(), "application/json");
+      root = jsonParser.parse(response).getAsJsonObject();
+      stages = JenkinsStages.fromJson(root);
+    } catch (BridgeHttpException e) {
+      if (e.getStatusCode() == 404) {
+        diagnostics.add("WFAPI describe endpoint returned 404");
+        return JenkinsPipelineGraph.unavailable(diagnostics);
+      }
+      throw e;
+    }
+
+    List<JenkinsWfapiNode> rawNodes = new ArrayList<JenkinsWfapiNode>();
+    for (JenkinsStage stage : stages.getStages()) {
+      JsonObject describe = getStageNodeDescribe(jobName, buildNumber, stage.getId(), diagnostics);
+      if (describe == null) {
+        continue;
+      }
+
+      JenkinsWfapiNode rootNode = JenkinsWfapiNode.fromJson(describe);
+      if (rootNode.hasId()) {
+        rawNodes.add(rootNode);
+      }
+      rawNodes.addAll(JenkinsWfapiNode.stageFlowNodesFromJson(describe));
+    }
+
+    return JenkinsPipelineGraph.fromWfapi(flowIdPrefix, stages, rawNodes, diagnostics);
+  }
+
+  private JenkinsPipelineGraph getBlueOceanPipelineGraph(
+      String jobName,
+      int buildNumber,
+      String flowIdPrefix
+  ) throws BridgeHttpException {
+    List<String> diagnostics = new ArrayList<String>();
+
+    JenkinsBridgeSettings settings = settingsProvider.load();
+    String url = settings.getJenkinsUrl()
+        + "/blue/rest/organizations/jenkins"
+        + blueOceanPipelinePath(jobName)
+        + "/runs/"
+        + buildNumber
+        + "/nodes/";
+
+    JsonArray nodes;
+    try {
+      String response = httpClient.get(url, settings.getJenkinsUser(), settings.getJenkinsToken(), "application/json");
+      JsonElement parsed = jsonParser.parse(response);
+      if (parsed.isJsonArray()) {
+        nodes = parsed.getAsJsonArray();
+      } else if (parsed.isJsonObject() && parsed.getAsJsonObject().get("nodes") != null) {
+        nodes = parsed.getAsJsonObject().getAsJsonArray("nodes");
+      } else {
+        diagnostics.add("Blue Ocean nodes endpoint returned an unsupported JSON shape");
+        return JenkinsPipelineGraph.unavailable(diagnostics);
+      }
+    } catch (BridgeHttpException e) {
+      if (e.getStatusCode() == 404) {
+        diagnostics.add("Blue Ocean nodes endpoint returned 404");
+        return JenkinsPipelineGraph.unavailable(diagnostics);
+      }
+      throw e;
+    }
+
+    return fromBlueOceanNodes(flowIdPrefix, nodes, diagnostics);
+  }
+
+  private JenkinsPipelineGraph fromBlueOceanNodes(
+      String flowIdPrefix,
+      JsonArray blueNodes,
+      List<String> diagnostics
+  ) {
+    Map<String, JsonObject> rawById = new LinkedHashMap<String, JsonObject>();
+    Map<String, Set<String>> childIdsById = new LinkedHashMap<String, Set<String>>();
+    Map<String, Set<String>> parentIdsById = new LinkedHashMap<String, Set<String>>();
+
+    for (JsonElement element : blueNodes) {
+      if (element == null || !element.isJsonObject()) {
+        continue;
+      }
+      JsonObject node = element.getAsJsonObject();
+      String id = stringValue(node, "id");
+      if (id.length() == 0 || isBlueOceanStepNode(node)) {
+        continue;
+      }
+      rawById.put(id, node);
+      childIdsById.put(id, new LinkedHashSet<String>());
+      parentIdsById.put(id, new LinkedHashSet<String>());
+    }
+
+    if (rawById.isEmpty()) {
+      diagnostics.add("Blue Ocean returned no graph nodes");
+      return JenkinsPipelineGraph.unavailable(diagnostics);
+    }
+
+    for (Map.Entry<String, JsonObject> entry : rawById.entrySet()) {
+      String parentId = entry.getKey();
+      JsonArray edges = entry.getValue().getAsJsonArray("edges");
+      if (edges == null) {
+        continue;
+      }
+      for (JsonElement edge : edges) {
+        String childId = edgeId(edge);
+        if (childId.length() == 0 || !rawById.containsKey(childId)) {
+          continue;
+        }
+        childIdsById.get(parentId).add(childId);
+        parentIdsById.get(childId).add(parentId);
+      }
+    }
+
+    boolean hasEdge = false;
+    for (Set<String> children : childIdsById.values()) {
+      if (!children.isEmpty()) {
+        hasEdge = true;
+        break;
+      }
+    }
+    if (!hasEdge && rawById.size() > 1) {
+      diagnostics.add("Blue Ocean returned nodes without usable edges");
+      return JenkinsPipelineGraph.unavailable(diagnostics);
+    }
+
+    List<String> orderedIds = new ArrayList<String>(rawById.keySet());
+    List<JenkinsPipelineGraphNode> graphNodes = new ArrayList<JenkinsPipelineGraphNode>();
+    for (String id : orderedIds) {
+      JsonObject raw = rawById.get(id);
+      graphNodes.add(new JenkinsPipelineGraphNode(
+          id,
+          nullToEmpty(flowIdPrefix) + ":" + id,
+          displayName(raw),
+          blueOceanStatus(raw),
+          blueOceanStartTimeMillis(raw),
+          longValue(raw, "durationMillis", longValue(raw, "durationInMillis", 0L)),
+          inOrder(parentIdsById.get(id), orderedIds),
+          inOrder(childIdsById.get(id), orderedIds),
+          new ArrayList<String>()));
+    }
+
+    diagnostics.add("Blue Ocean graph used for Pipeline topology");
+    return JenkinsPipelineGraph.explicit(JenkinsPipelineGraph.SOURCE_BLUE_OCEAN, graphNodes, diagnostics);
+  }
+
+  private boolean isBlueOceanStepNode(JsonObject node) {
+    String type = stringValue(node, "type");
+    return "STEP".equalsIgnoreCase(type);
+  }
+
+  private String edgeId(JsonElement edge) {
+    if (edge == null || edge.isJsonNull()) {
+      return "";
+    }
+    if (edge.isJsonPrimitive()) {
+      return edge.getAsString();
+    }
+    if (edge.isJsonObject()) {
+      return stringValue(edge.getAsJsonObject(), "id");
+    }
+    return "";
+  }
+
+  private List<String> inOrder(Set<String> ids, List<String> orderedIds) {
+    List<String> ordered = new ArrayList<String>();
+    if (ids == null || ids.isEmpty()) {
+      return ordered;
+    }
+    for (String orderedId : orderedIds) {
+      if (ids.contains(orderedId)) {
+        ordered.add(orderedId);
+      }
+    }
+    return ordered;
+  }
+
+  private String displayName(JsonObject node) {
+    String displayName = stringValue(node, "displayName");
+    if (displayName.length() > 0) {
+      return displayName;
+    }
+    return stringValue(node, "name");
+  }
+
+  private String blueOceanStatus(JsonObject node) {
+    String result = stringValue(node, "result");
+    if (result.length() > 0 && !"UNKNOWN".equalsIgnoreCase(result)) {
+      if ("NOT_BUILT".equalsIgnoreCase(result)) {
+        return "NOT_EXECUTED";
+      }
+      if ("FAILED".equalsIgnoreCase(result)) {
+        return "FAILURE";
+      }
+      return result.toUpperCase();
+    }
+
+    String state = stringValue(node, "state");
+    if ("RUNNING".equalsIgnoreCase(state)) {
+      return "IN_PROGRESS";
+    }
+    if ("QUEUED".equalsIgnoreCase(state) || "PAUSED".equalsIgnoreCase(state)) {
+      return state.toUpperCase();
+    }
+    return "";
+  }
+
+  private long blueOceanStartTimeMillis(JsonObject node) {
+    long numericStart = longValue(node, "startTimeMillis", 0L);
+    if (numericStart > 0L) {
+      return numericStart;
+    }
+    String startTime = stringValue(node, "startTime");
+    if (startTime.length() == 0) {
+      return 0L;
+    }
+    try {
+      Date date = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.US).parse(startTime);
+      return date == null ? 0L : date.getTime();
+    } catch (ParseException e) {
+      return 0L;
+    }
+  }
+
+  private long longValue(JsonObject object, String key, long defaultValue) {
+    JsonElement value = object.get(key);
+    if (value == null || value.isJsonNull()) {
+      return defaultValue;
+    }
+    try {
+      return value.getAsLong();
+    } catch (RuntimeException e) {
+      return defaultValue;
+    }
+  }
+
+  private String stringValue(JsonObject object, String key) {
+    JsonElement value = object.get(key);
+    if (value == null || value.isJsonNull()) {
+      return "";
+    }
+    try {
+      return value.getAsString();
+    } catch (RuntimeException e) {
+      return "";
+    }
+  }
+
   /**
    * Fetches the console text of one Pipeline stage. The stage node itself carries no log, so this
    * descends into the stage's {@code stageFlowNodes} (echo / sh / etc. steps) and concatenates each
@@ -254,6 +551,15 @@ public class JenkinsClient {
    * {@code 404} (stage not yet materialized) yields no nodes.
    */
   JenkinsStageNodes getStageNodes(String jobName, int buildNumber, String stageId) throws BridgeHttpException {
+    JsonObject describe = getStageNodeDescribe(jobName, buildNumber, stageId, null);
+    if (describe == null) {
+      return JenkinsStageNodes.empty();
+    }
+    return JenkinsStageNodes.fromJson(describe);
+  }
+
+  private JsonObject getStageNodeDescribe(String jobName, int buildNumber, String stageId, List<String> diagnostics)
+      throws BridgeHttpException {
     JenkinsBridgeSettings settings = settingsProvider.load();
     String url = settings.getJenkinsUrl()
         + jenkinsJobPath(jobName)
@@ -265,10 +571,13 @@ public class JenkinsClient {
 
     try {
       String response = httpClient.get(url, settings.getJenkinsUser(), settings.getJenkinsToken(), "application/json");
-      return JenkinsStageNodes.fromJson(jsonParser.parse(response).getAsJsonObject());
+      return jsonParser.parse(response).getAsJsonObject();
     } catch (BridgeHttpException e) {
       if (e.getStatusCode() == 404) {
-        return JenkinsStageNodes.empty();
+        if (diagnostics != null) {
+          diagnostics.add("WFAPI node " + stageId + " returned 404");
+        }
+        return null;
       }
       throw e;
     }
@@ -394,6 +703,21 @@ public class JenkinsClient {
       }
     }
     return result.toString();
+  }
+
+  private String blueOceanPipelinePath(String jobName) {
+    String[] segments = jobName.split("/");
+    StringBuilder result = new StringBuilder();
+    for (String segment : segments) {
+      if (segment.length() > 0) {
+        result.append("/pipelines/").append(encodePathSegment(segment));
+      }
+    }
+    return result.toString();
+  }
+
+  private String nullToEmpty(String value) {
+    return value == null ? "" : value;
   }
 
   private String encodePathSegment(String value) {

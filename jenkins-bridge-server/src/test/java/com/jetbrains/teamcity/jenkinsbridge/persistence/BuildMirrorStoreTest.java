@@ -2,6 +2,9 @@ package com.jetbrains.teamcity.jenkinsbridge.persistence;
 
 import com.google.gson.JsonObject;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsPipelineGraph;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsPipelineGraphNode;
+import com.jetbrains.teamcity.jenkinsbridge.model.GraphConfidence;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettings;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettingsProvider;
 import org.junit.Test;
@@ -10,7 +13,11 @@ import java.io.File;
 import java.lang.reflect.Constructor;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -82,11 +89,90 @@ public class BuildMirrorStoreTest {
     }
   }
 
+  @Test
+  public void pipelineGraphSnapshotPersistsAcrossReload() throws Exception {
+    JenkinsBridgeSettingsProvider provider = providerWithTempStateFile();
+    BuildMirrorStore store = new BuildMirrorStore(null, provider);
+    BuildMirror mirror = store.getOrCreateMirror(BuildMirrorStore.buildKey("job", 7), "job", "buildType", buildInfo(7));
+
+    mirror.setPipelineGraph(graph("hash-a", "SUCCESS", Collections.<String>emptyList()));
+    store.saveMirror(mirror);
+
+    BuildMirrorStore reloaded = new BuildMirrorStore(null, provider);
+    BuildMirror restored = reloaded.findMirror(BuildMirrorStore.buildKey("job", 7));
+
+    assertNotNull(restored);
+    assertNotNull(restored.getPipelineGraph());
+    assertEquals("hash-a", restored.getPipelineGraph().getTopologyHash());
+    assertEquals(GraphConfidence.EXPLICIT, restored.getPipelineGraph().getConfidence());
+    assertEquals("job#7:1", restored.getPipelineGraph().getNodes().get(0).getFlowId());
+  }
+
+  @Test
+  public void pipelineChainSnapshotPersistsAcrossReload() throws Exception {
+    JenkinsBridgeSettingsProvider provider = providerWithTempStateFile();
+    BuildMirrorStore store = new BuildMirrorStore(null, provider);
+    BuildMirror mirror = store.getOrCreateMirror(BuildMirrorStore.buildKey("job", 8), "job", "buildType", buildInfo(8));
+
+    Map<String, PipelineChainNodeMirror> nodes = new LinkedHashMap<String, PipelineChainNodeMirror>();
+    nodes.put("1", new PipelineChainNodeMirror("1", "job#8:1", "BuildType_JenkinsFlow_hash_1", 101L));
+    mirror.setPipelineChain(new PipelineChainMirror(
+        "hash-a",
+        "EXPLICIT",
+        "BuildType_JenkinsFlow_hash_Top",
+        200L,
+        nodes,
+        Arrays.asList("1"),
+        Arrays.asList(101L),
+        true));
+    store.saveMirror(mirror);
+
+    BuildMirrorStore reloaded = new BuildMirrorStore(null, provider);
+    BuildMirror restored = reloaded.findMirror(BuildMirrorStore.buildKey("job", 8));
+
+    assertNotNull(restored);
+    assertNotNull(restored.getPipelineChain());
+    assertEquals("hash-a", restored.getPipelineChain().getTopologyHash());
+    assertEquals(Long.valueOf(200L), restored.getPipelineChain().getTopPromotionId());
+    assertTrue(restored.getPipelineChain().matchesQueuedTopology("hash-a"));
+    assertEquals(Long.valueOf(101L), restored.getPipelineChain().getNode("1").getPromotionId());
+  }
+
+  @Test
+  public void graphTopologyHashCanStayStableWhileSnapshotStatusChanges() throws Exception {
+    JenkinsPipelineGraph success = graph("same-hash", "SUCCESS", Collections.<String>emptyList());
+    JenkinsPipelineGraph failed = graph("same-hash", "FAILURE", Collections.<String>emptyList());
+
+    assertEquals(success.getTopologyHash(), failed.getTopologyHash());
+    assertEquals("SUCCESS", success.getNodes().get(0).getStatus());
+    assertEquals("FAILURE", failed.getNodes().get(0).getStatus());
+  }
+
+  @Test
+  public void graphTopologyHashChangesWhenEdgesChange() {
+    JenkinsPipelineGraph noParent = graph("hash-a", "SUCCESS", Collections.<String>emptyList());
+    JenkinsPipelineGraph withParent = graph("hash-b", "SUCCESS", Arrays.asList("0"));
+
+    assertTrue(!noParent.getTopologyHash().equals(withParent.getTopologyHash()));
+  }
+
   private static JenkinsBuildInfo buildInfo(int number) {
     JsonObject json = new JsonObject();
     json.addProperty("number", number);
     json.addProperty("building", true);
     return JenkinsBuildInfo.fromJson(json);
+  }
+
+  private static JenkinsPipelineGraph graph(String hash, String status, List<String> parents) {
+    return new JenkinsPipelineGraph(
+        true,
+        JenkinsPipelineGraph.SOURCE_WFAPI,
+        Arrays.asList(new JenkinsPipelineGraphNode(
+            "1", "job#7:1", "Build", status, 1000L, 10L,
+            parents, Collections.<String>emptyList(), Collections.<String>emptyList())),
+        hash,
+        GraphConfidence.EXPLICIT,
+        Collections.<String>emptyList());
   }
 
   private static JenkinsBridgeSettingsProvider providerWithTempStateFile() throws Exception {

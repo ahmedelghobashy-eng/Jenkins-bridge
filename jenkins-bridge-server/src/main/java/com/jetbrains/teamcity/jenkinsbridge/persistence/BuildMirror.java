@@ -2,6 +2,7 @@ package com.jetbrains.teamcity.jenkinsbridge.persistence;
 
 import com.google.gson.annotations.SerializedName;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsPipelineGraph;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -27,6 +28,11 @@ public class BuildMirror {
   private Boolean pipelineMode;
   // Per-stage watermarks, keyed by Jenkins stage id; only populated for Pipeline builds.
   private Map<String, StageMirror> stages;
+  // Latest normalized WFAPI graph snapshot for this Jenkins run. Used by future chain mirroring.
+  private JenkinsPipelineGraph pipelineGraph;
+  // Native TeamCity build-chain mirror for the latest eligible Pipeline graph snapshot.
+  private PipelineChainMirror pipelineChain;
+  private String pipelineChainMessageKey;
   private boolean metadataLogSent;
   private boolean summaryLogSent;
   private boolean testsSynced;
@@ -124,6 +130,30 @@ public class BuildMirror {
       stages = new LinkedHashMap<String, StageMirror>();
     }
     return stages;
+  }
+
+  public JenkinsPipelineGraph getPipelineGraph() {
+    return pipelineGraph;
+  }
+
+  public void setPipelineGraph(JenkinsPipelineGraph pipelineGraph) {
+    this.pipelineGraph = pipelineGraph;
+  }
+
+  public PipelineChainMirror getPipelineChain() {
+    return pipelineChain;
+  }
+
+  public void setPipelineChain(PipelineChainMirror pipelineChain) {
+    this.pipelineChain = pipelineChain;
+  }
+
+  public String getPipelineChainMessageKey() {
+    return pipelineChainMessageKey;
+  }
+
+  public void setPipelineChainMessageKey(String pipelineChainMessageKey) {
+    this.pipelineChainMessageKey = pipelineChainMessageKey;
   }
 
   public boolean isMetadataLogSent() {

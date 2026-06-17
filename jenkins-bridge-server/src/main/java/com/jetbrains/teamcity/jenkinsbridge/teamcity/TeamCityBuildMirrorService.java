@@ -3,11 +3,15 @@ package com.jetbrains.teamcity.jenkinsbridge.teamcity;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpException;
 import com.jetbrains.teamcity.jenkinsbridge.jenkins.JenkinsClient;
 import com.jetbrains.teamcity.jenkinsbridge.persistence.BuildMirror;
+import com.jetbrains.teamcity.jenkinsbridge.persistence.PipelineChainMirror;
+import com.jetbrains.teamcity.jenkinsbridge.persistence.PipelineChainNodeMirror;
 import com.jetbrains.teamcity.jenkinsbridge.persistence.BuildMirrorStore;
 import com.jetbrains.teamcity.jenkinsbridge.persistence.StageMirror;
 import com.jetbrains.teamcity.jenkinsbridge.persistence.SyncState;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsLogChunk;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsPipelineGraph;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsPipelineGraphNode;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStage;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStageLog;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStages;
@@ -26,8 +30,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TimeZone;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class TeamCityBuildMirrorService {
+  private static final Logger LOG = Logger.getLogger(TeamCityBuildMirrorService.class.getName());
   private static final Set<SyncState> RUNNING_DATA_ALREADY_SENT_STATES = EnumSet.of(
       SyncState.RUNNING_SENT,
       SyncState.LOG_SYNCING,
@@ -42,6 +49,7 @@ public class TeamCityBuildMirrorService {
   private final TeamCityTestReporter teamCityTestReporter;
   private final TeamCityStageReporter teamCityStageReporter;
   private final TeamCityBuildFinisher teamCityBuildFinisher;
+  private final TeamCityPipelineChainService teamCityPipelineChainService;
   private final BuildMirrorStore mirrorStore;
 
   public TeamCityBuildMirrorService(
@@ -53,6 +61,7 @@ public class TeamCityBuildMirrorService {
       TeamCityTestReporter teamCityTestReporter,
       TeamCityStageReporter teamCityStageReporter,
       TeamCityBuildFinisher teamCityBuildFinisher,
+      TeamCityPipelineChainService teamCityPipelineChainService,
       BuildMirrorStore mirrorStore
   ) {
     this.settingsProvider = settingsProvider;
@@ -63,6 +72,7 @@ public class TeamCityBuildMirrorService {
     this.teamCityTestReporter = teamCityTestReporter;
     this.teamCityStageReporter = teamCityStageReporter;
     this.teamCityBuildFinisher = teamCityBuildFinisher;
+    this.teamCityPipelineChainService = teamCityPipelineChainService;
     this.mirrorStore = mirrorStore;
   }
 
@@ -70,8 +80,35 @@ public class TeamCityBuildMirrorService {
   // May need better naming
   public long ensureTeamCityBuild(BuildMirror mirror, JenkinsBuildInfo jenkinsInfo)
       throws BridgeHttpException, IOException {
+    return ensureTeamCityBuild(mirror, jenkinsInfo, null);
+  }
+
+  public long ensureTeamCityBuild(BuildMirror mirror, JenkinsBuildInfo jenkinsInfo, JenkinsPipelineGraph graph)
+      throws BridgeHttpException, IOException {
     if (mirror.getTeamCityBuildId() != null) {
       return mirror.getTeamCityBuildId();
+    }
+
+    if (graph != null && teamCityPipelineChainService != null) {
+      try {
+        PipelineChainMirror chain = teamCityPipelineChainService.ensureChain(mirror, graph);
+        if (chain != null && chain.getTopPromotionId() != null) {
+          mirror.setPipelineGraph(graph);
+          mirror.setPipelineChain(chain);
+          mirror.setTeamCityBuildId(chain.getTopPromotionId());
+          mirror.setSyncState(SyncState.TEAMCITY_CREATED);
+          mirror.setLastError(null);
+          mirrorStore.saveMirror(mirror);
+          return chain.getTopPromotionId();
+        }
+      } catch (Exception e) {
+        mirror.setLastError("Pipeline chain creation failed before queueing mirror build: "
+            + e.getClass().getSimpleName()
+            + (e.getMessage() == null ? "" : ": " + e.getMessage()));
+        mirrorStore.saveMirror(mirror);
+        LOG.log(Level.WARNING, "Jenkins Bridge: failed to create native TeamCity Pipeline chain for "
+            + mirror.getJenkinsBuildKey() + "; falling back to a single mirror build", e);
+      }
     }
 
     Long restoredBuildId = teamCityClient.findBuildIdByJenkinsBuildKey(mirror.getJenkinsBuildKey());
@@ -154,6 +191,159 @@ public class TeamCityBuildMirrorService {
     mirror.setSyncState(SyncState.LOG_SYNCING);
     mirror.setLastError(null);
     mirrorStore.saveMirror(mirror);
+  }
+
+  public void syncPipelineGraph(BuildMirror mirror, long teamCityBuildId, JenkinsPipelineGraph graph)
+      throws BridgeHttpException, IOException {
+    if (graph == null) {
+      return;
+    }
+
+    mirror.setPipelineGraph(graph);
+    mirror.setLastError(null);
+    mirrorStore.saveMirror(mirror);
+
+    if (teamCityPipelineChainService == null) {
+      appendPipelineChainLogOnce(
+          mirror,
+          teamCityBuildId,
+          pipelineChainMessageKey(graph, "disabled"),
+          "Native TeamCity Pipeline chain: disabled in this plugin wiring.\n");
+      return;
+    }
+
+    try {
+      if (mirror.getPipelineChain() != null
+          && mirror.getPipelineChain().matchesQueuedTopology(graph.getTopologyHash())) {
+        syncPipelineChainNodeStates(mirror, graph, mirror.getPipelineChain());
+        appendPipelineChainLogOnce(
+            mirror,
+            teamCityBuildId,
+            pipelineChainMessageKey(graph, "attached"),
+            "Native TeamCity Pipeline chain: attached to this build; "
+                + mirror.getPipelineChain().getNodes().size()
+                + " node build(s), terminal node(s) "
+                + mirror.getPipelineChain().getTerminalNodeIds()
+                + ", top promotion id "
+                + mirror.getPipelineChain().getTopPromotionId()
+                + ".\n");
+        return;
+      }
+      appendPipelineChainLogOnce(
+          mirror,
+          teamCityBuildId,
+          pipelineChainMessageKey(graph, "not-attached"),
+          "Native TeamCity Pipeline chain: not attached to this build; graph confidence "
+              + graph.getConfidence()
+              + ", topology " + graph.getTopologyHash() + ".\n");
+      mirror.setLastError(null);
+      mirrorStore.saveMirror(mirror);
+    } catch (Exception e) {
+      mirror.setLastError("Pipeline chain creation failed: " + e.getClass().getSimpleName()
+          + (e.getMessage() == null ? "" : ": " + e.getMessage()));
+      appendPipelineChainLogOnce(
+          mirror,
+          teamCityBuildId,
+          pipelineChainMessageKey(graph, "failed"),
+          "Native TeamCity Pipeline chain: failed: " + e.getClass().getSimpleName()
+              + (e.getMessage() == null ? "" : ": " + e.getMessage()) + ".\n");
+      mirrorStore.saveMirror(mirror);
+      LOG.log(Level.WARNING, "Jenkins Bridge: failed to create native TeamCity Pipeline chain for "
+          + mirror.getJenkinsBuildKey(), e);
+    }
+  }
+
+  private void appendPipelineChainLogOnce(
+      BuildMirror mirror,
+      long teamCityBuildId,
+      String key,
+      String text
+  ) throws BridgeHttpException, IOException {
+    if (key.equals(mirror.getPipelineChainMessageKey())) {
+      return;
+    }
+    teamCityBuildLogger.addBuildLog(teamCityBuildId, text);
+    mirror.setPipelineChainMessageKey(key);
+  }
+
+  private String pipelineChainMessageKey(JenkinsPipelineGraph graph, String state) {
+    return nullToEmpty(graph.getTopologyHash()) + ":" + graph.getConfidence() + ":" + state;
+  }
+
+  private void syncPipelineChainNodeStates(
+      BuildMirror mirror,
+      JenkinsPipelineGraph graph,
+      PipelineChainMirror chain
+  ) throws BridgeHttpException, IOException {
+    if (chain == null || graph == null) {
+      return;
+    }
+
+    for (JenkinsPipelineGraphNode graphNode : graph.getNodes()) {
+      PipelineChainNodeMirror nodeMirror = chain.getNode(graphNode.getId());
+      if (nodeMirror == null || nodeMirror.getPromotionId() == null) {
+        continue;
+      }
+
+      String status = nullToEmpty(graphNode.getStatus());
+      nodeMirror.setLastStatus(status);
+
+      if (!nodeMirror.isRunningSent() && shouldStartPipelineChainNode(status)) {
+        teamCityBuildStarter.markBuildAsRunning(
+            nodeMirror.getPromotionId(),
+            "Mirroring Jenkins flow node " + graphNode.getName()
+                + " from " + mirror.getJenkinsBuildKey());
+        nodeMirror.setRunningSent(true);
+      }
+
+      if (nodeMirror.isRunningSent() && !nodeMirror.isFinished() && isTerminalPipelineNodeStatus(status)) {
+        teamCityBuildFinisher.finishBuild(
+            nodeMirror.getPromotionId(),
+            pipelineNodeFinishTime(graphNode),
+            jenkinsResultForPipelineNodeStatus(status));
+        nodeMirror.setFinished(true);
+      }
+    }
+  }
+
+  private boolean shouldStartPipelineChainNode(String status) {
+    return status.length() > 0;
+  }
+
+  private boolean isTerminalPipelineNodeStatus(String status) {
+    return "SUCCESS".equals(status)
+        || "FAILED".equals(status)
+        || "FAILURE".equals(status)
+        || "UNSTABLE".equals(status)
+        || "ABORTED".equals(status)
+        || "NOT_EXECUTED".equals(status);
+  }
+
+  static String jenkinsResultForPipelineNodeStatus(String status) {
+    if ("FAILED".equals(status) || "FAILURE".equals(status)) {
+      return "FAILURE";
+    }
+    if ("NOT_EXECUTED".equals(status)) {
+      // A skipped Jenkins stage should be visible as a red graph node, but not as a canceled
+      // dependency. FAILURE gives the node a failed TeamCity result; dependency continuation mode
+      // decides whether downstream nodes inherit a dependency problem.
+      return "FAILURE";
+    }
+    if ("SUCCESS".equals(status)
+        || "UNSTABLE".equals(status)
+        || "ABORTED".equals(status)) {
+      return status;
+    }
+    return "UNKNOWN";
+  }
+
+  private Date pipelineNodeFinishTime(JenkinsPipelineGraphNode node) {
+    long start = node.getStartTimeMillis();
+    long duration = Math.max(0L, node.getDurationMillis());
+    if (start <= 0L) {
+      return new Date();
+    }
+    return new Date(start + duration);
   }
 
   /**

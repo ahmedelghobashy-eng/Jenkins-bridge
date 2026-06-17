@@ -6,6 +6,8 @@ import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpResponse;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsCrumb;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsJobParameters;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsLogChunk;
+import com.jetbrains.teamcity.jenkinsbridge.model.GraphConfidence;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsPipelineGraph;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStageLog;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStageNodes;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStages;
@@ -239,6 +241,101 @@ public class JenkinsClientTest {
 
     assertEquals("http://jenkins/job/folder/job/job/7/execution/node/8/wfapi/log", httpClient.url);
     assertEquals("+ mvn test\nok\n", log.getText());
+  }
+
+  @Test
+  public void getPipelineGraphFetchesWfapiNodesAndBuildsStageGraph() throws Exception {
+    RoutingHttpClient httpClient = new RoutingHttpClient();
+    httpClient.responses.put("/job/job/26/wfapi/describe",
+        "{\"stages\":["
+            + "{\"id\":\"6\",\"name\":\"Build\",\"status\":\"SUCCESS\",\"startTimeMillis\":1000,\"durationMillis\":500},"
+            + "{\"id\":\"9\",\"name\":\"Test\",\"status\":\"IN_PROGRESS\",\"startTimeMillis\":2000,\"durationMillis\":0}"
+            + "]}");
+    httpClient.responses.put("/execution/node/6/wfapi/describe",
+        "{\"id\":\"6\",\"name\":\"Build\",\"status\":\"SUCCESS\",\"parentNodes\":[],"
+            + "\"stageFlowNodes\":[{\"id\":\"7\",\"name\":\"sh\",\"parentNodes\":[\"6\"],"
+            + "\"_links\":{\"log\":{\"href\":\"x\"}}}]}");
+    httpClient.responses.put("/execution/node/9/wfapi/describe",
+        "{\"id\":\"9\",\"name\":\"Test\",\"status\":\"IN_PROGRESS\",\"parentNodes\":[{\"id\":\"6\"}],"
+            + "\"stageFlowNodes\":[{\"id\":\"10\",\"name\":\"sh\",\"parentNodes\":[{\"id\":\"9\"}],"
+            + "\"_links\":{\"log\":{\"href\":\"y\"}}}]}");
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    JenkinsPipelineGraph graph = client.getPipelineGraph("job", 26, "job#26");
+
+    assertTrue(graph.isPipeline());
+    assertEquals(GraphConfidence.EXPLICIT, graph.getConfidence());
+    assertEquals(2, graph.getNodes().size());
+    assertEquals("job#26:9", graph.getNodes().get(1).getFlowId());
+    assertEquals(Arrays.asList("6"), graph.getNodes().get(1).getParentIds());
+    assertEquals(Arrays.asList("10"), graph.getNodes().get(1).getLogNodeIds());
+  }
+
+  @Test
+  public void getPipelineGraphUsesBlueOceanEdgesWhenAvailable() throws Exception {
+    RoutingHttpClient httpClient = new RoutingHttpClient();
+    httpClient.responses.put("/job/job/42/wfapi/describe",
+        "{\"stages\":["
+            + "{\"id\":\"6\",\"name\":\"Setup\",\"status\":\"SUCCESS\",\"startTimeMillis\":1000,\"durationMillis\":100},"
+            + "{\"id\":\"9\",\"name\":\"Parallel Tests\",\"status\":\"SUCCESS\",\"startTimeMillis\":1200,\"durationMillis\":100},"
+            + "{\"id\":\"12\",\"name\":\"Linux Tests\",\"status\":\"SUCCESS\",\"startTimeMillis\":1300,\"durationMillis\":300},"
+            + "{\"id\":\"15\",\"name\":\"Windows Tests\",\"status\":\"SUCCESS\",\"startTimeMillis\":1300,\"durationMillis\":300},"
+            + "{\"id\":\"18\",\"name\":\"Deploy\",\"status\":\"NOT_EXECUTED\",\"startTimeMillis\":1700,\"durationMillis\":1}"
+            + "]}");
+    httpClient.responses.put("/execution/node/6/wfapi/describe", "{\"id\":\"6\",\"parentNodes\":[]}");
+    httpClient.responses.put("/execution/node/9/wfapi/describe", "{\"id\":\"9\",\"parentNodes\":[]}");
+    httpClient.responses.put("/execution/node/12/wfapi/describe", "{\"id\":\"12\",\"parentNodes\":[]}");
+    httpClient.responses.put("/execution/node/15/wfapi/describe", "{\"id\":\"15\",\"parentNodes\":[]}");
+    httpClient.responses.put("/execution/node/18/wfapi/describe", "{\"id\":\"18\",\"parentNodes\":[]}");
+    httpClient.responses.put("/blue/rest/organizations/jenkins/pipelines/job/runs/42/nodes/",
+        "["
+            + "{\"id\":\"6\",\"displayName\":\"Setup\",\"type\":\"STAGE\",\"result\":\"SUCCESS\",\"edges\":[{\"id\":\"9\"}]},"
+            + "{\"id\":\"9\",\"displayName\":\"Parallel Tests\",\"type\":\"STAGE\",\"result\":\"SUCCESS\",\"edges\":[{\"id\":\"12\"},{\"id\":\"15\"}]},"
+            + "{\"id\":\"12\",\"displayName\":\"Linux Tests\",\"type\":\"PARALLEL\",\"result\":\"SUCCESS\",\"edges\":[{\"id\":\"18\"}]},"
+            + "{\"id\":\"15\",\"displayName\":\"Windows Tests\",\"type\":\"PARALLEL\",\"result\":\"SUCCESS\",\"edges\":[{\"id\":\"18\"}]},"
+            + "{\"id\":\"18\",\"displayName\":\"Deploy\",\"type\":\"STAGE\",\"result\":\"NOT_BUILT\",\"edges\":[]}"
+            + "]");
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    JenkinsPipelineGraph graph = client.getPipelineGraph("job", 42, "job#42");
+
+    assertEquals(JenkinsPipelineGraph.SOURCE_BLUE_OCEAN, graph.getSource());
+    assertEquals(GraphConfidence.EXPLICIT, graph.getConfidence());
+    assertEquals(Arrays.asList("9"), graph.getNodes().get(2).getParentIds());
+    assertEquals(Arrays.asList("12", "15"), graph.getNodes().get(4).getParentIds());
+    assertEquals("NOT_EXECUTED", graph.getNodes().get(4).getStatus());
+  }
+
+  @Test
+  public void getPipelineGraphFallsBackToLinearWfapiWhenBlueOceanIsUnavailable() throws Exception {
+    RoutingHttpClient httpClient = new RoutingHttpClient();
+    httpClient.responses.put("/job/job/43/wfapi/describe",
+        "{\"stages\":["
+            + "{\"id\":\"6\",\"name\":\"Build\",\"status\":\"SUCCESS\"},"
+            + "{\"id\":\"9\",\"name\":\"Test\",\"status\":\"SUCCESS\"}"
+            + "]}");
+    httpClient.responses.put("/execution/node/6/wfapi/describe", "{\"id\":\"6\",\"parentNodes\":[]}");
+    httpClient.responses.put("/execution/node/9/wfapi/describe", "{\"id\":\"9\",\"parentNodes\":[]}");
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    JenkinsPipelineGraph graph = client.getPipelineGraph("job", 43, "job#43");
+
+    assertEquals(JenkinsPipelineGraph.SOURCE_WFAPI, graph.getSource());
+    assertEquals(GraphConfidence.LINEAR_FALLBACK, graph.getConfidence());
+    assertEquals(Arrays.asList("6"), graph.getNodes().get(1).getParentIds());
+    assertTrue(graph.getDiagnostics().toString().contains("Blue Ocean nodes endpoint returned 404"));
+  }
+
+  @Test
+  public void getPipelineGraphReturnsUnavailableOnWfapi404() throws Exception {
+    NotFoundHttpClient httpClient = new NotFoundHttpClient();
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    JenkinsPipelineGraph graph = client.getPipelineGraph("job", 3);
+
+    assertFalse(graph.isPipeline());
+    assertEquals(GraphConfidence.UNAVAILABLE, graph.getConfidence());
+    assertTrue(graph.getNodes().isEmpty());
   }
 
   @Test
