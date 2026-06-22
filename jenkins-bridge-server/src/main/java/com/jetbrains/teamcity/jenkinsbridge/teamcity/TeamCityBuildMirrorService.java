@@ -112,6 +112,10 @@ public class TeamCityBuildMirrorService {
     }
 
     Long restoredBuildId = teamCityClient.findBuildIdByJenkinsBuildKey(mirror.getJenkinsBuildKey());
+    String legacyBuildKey = BuildMirrorStore.legacyBuildKey(mirror.getJenkinsBuildKey());
+    if (restoredBuildId == null && !legacyBuildKey.equals(mirror.getJenkinsBuildKey())) {
+      restoredBuildId = teamCityClient.findBuildIdByJenkinsBuildKey(legacyBuildKey);
+    }
 
     // If there already exists a build with the same Jenkins build key, use it
 
@@ -143,6 +147,7 @@ public class TeamCityBuildMirrorService {
     Map<String, String> properties = new LinkedHashMap<String, String>();
     properties.put("jenkins.job", mirror.getJenkinsJob());
     properties.put("jenkins.build.number", String.valueOf(mirror.getJenkinsBuildNumber()));
+    properties.put("jenkins.build.timestamp", String.valueOf(mirror.getJenkinsBuildTimestamp()));
     properties.put("jenkins.build.key", mirror.getJenkinsBuildKey());
     properties.put("jenkins.build.url", nullToEmpty(jenkinsInfo.getUrl()));
     return properties;

@@ -73,6 +73,22 @@ public class JenkinsClient {
     return fetchBuildNumbers(jobName, "allBuilds");
   }
 
+  /**
+   * Returns the (up to 100) most recent builds with enough metadata to identify a Jenkins run even
+   * when build numbers are reused after history deletion/reset.
+   */
+  public List<JenkinsBuildInfo> getBuilds(String jobName) throws BridgeHttpException {
+    return fetchBuildInfos(jobName, "builds");
+  }
+
+  /**
+   * Returns all builds with identity metadata. This is complete but potentially expensive, so
+   * callers should use it only after detecting that the recent-build window is insufficient.
+   */
+  public List<JenkinsBuildInfo> getAllBuilds(String jobName) throws BridgeHttpException {
+    return fetchBuildInfos(jobName, "allBuilds");
+  }
+
   private List<Integer> fetchBuildNumbers(String jobName, String collection) throws BridgeHttpException {
     JenkinsBridgeSettings settings = settingsProvider.load();
     String tree = collection + "[number]";
@@ -100,6 +116,31 @@ public class JenkinsClient {
     }
 
     return numbers;
+  }
+
+  private List<JenkinsBuildInfo> fetchBuildInfos(String jobName, String collection) throws BridgeHttpException {
+    JenkinsBridgeSettings settings = settingsProvider.load();
+    String tree = collection + "[number,timestamp,url]";
+    String url = settings.getJenkinsUrl()
+        + jenkinsJobPath(jobName)
+        + "/api/json?tree="
+        + encodeQueryValue(tree);
+
+    String response = httpClient.get(url, settings.getJenkinsUser(), settings.getJenkinsToken(), "application/json");
+    JsonObject root = jsonParser.parse(response).getAsJsonObject();
+    JsonArray builds = root.getAsJsonArray(collection);
+    List<JenkinsBuildInfo> result = new ArrayList<JenkinsBuildInfo>();
+    if (builds == null) {
+      return result;
+    }
+
+    for (JsonElement build : builds) {
+      if (build != null && build.isJsonObject()) {
+        result.add(JenkinsBuildInfo.fromJson(build.getAsJsonObject()));
+      }
+    }
+
+    return result;
   }
 
   public JenkinsBuildInfo getBuildInfo(String jobName, int buildNumber) throws BridgeHttpException {

@@ -16,6 +16,7 @@ public class BuildMirror {
   private String jenkinsBuildKey;
   private String jenkinsJob;
   private int jenkinsBuildNumber;
+  private long jenkinsBuildTimestamp;
   private String jenkinsBuildUrl;
   private Long teamCityBuildId;
   private String teamCityBuildTypeId;
@@ -56,6 +57,7 @@ public class BuildMirror {
     mirror.jenkinsBuildKey = key;
     mirror.jenkinsJob = job;
     mirror.jenkinsBuildNumber = jenkinsInfo.getNumber();
+    mirror.jenkinsBuildTimestamp = jenkinsInfo.getTimestamp();
     mirror.jenkinsBuildUrl = jenkinsInfo.getUrl();
     mirror.teamCityBuildTypeId = teamCityBuildTypeId;
     mirror.syncState = SyncState.DISCOVERED;
@@ -79,6 +81,10 @@ public class BuildMirror {
 
   public int getJenkinsBuildNumber() {
     return jenkinsBuildNumber;
+  }
+
+  public long getJenkinsBuildTimestamp() {
+    return jenkinsBuildTimestamp;
   }
 
   public String getJenkinsBuildUrl() {

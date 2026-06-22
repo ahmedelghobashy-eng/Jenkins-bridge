@@ -174,6 +174,21 @@ public class BuildMirrorStore {
     return jobName + "#" + buildNumber;
   }
 
+  public static String buildKey(String jobName, JenkinsBuildInfo jenkinsInfo) {
+    if (jenkinsInfo == null || jenkinsInfo.getTimestamp() <= 0L) {
+      return buildKey(jobName, jenkinsInfo == null ? 0 : jenkinsInfo.getNumber());
+    }
+    return buildKey(jobName, jenkinsInfo.getNumber()) + "@" + jenkinsInfo.getTimestamp();
+  }
+
+  public static String legacyBuildKey(String buildKey) {
+    if (buildKey == null) {
+      return "";
+    }
+    int timestampSeparator = buildKey.lastIndexOf('@');
+    return timestampSeparator < 0 ? buildKey : buildKey.substring(0, timestampSeparator);
+  }
+
   private void ensureLoaded() throws IOException {
     Path stateFile = getStateFile();
     if (state != null && stateFile.equals(loadedStateFile)) {

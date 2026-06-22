@@ -70,7 +70,7 @@ public class TeamCityBuildMirrorServiceTest {
     TeamCityBuildMirrorService service = new TeamCityBuildMirrorService(
         null, new NoExistingBuildClient(), queuer, null, null, null, null, null, null, new NoopStore());
 
-    BuildMirror mirror = BuildMirror.create("job#4", "job", buildInfo(4), "buildType", "now");
+    BuildMirror mirror = BuildMirror.create("job#4@1710000000004", "job", buildInfo(4), "buildType", "now");
     Map<String, String> parameters = new LinkedHashMap<String, String>();
     parameters.put("BRANCH", "feature/x");
     mirror.setJenkinsBuildParameters(parameters);
@@ -78,7 +78,8 @@ public class TeamCityBuildMirrorServiceTest {
     service.ensureTeamCityBuild(mirror, buildInfo(4), null);
 
     assertEquals("job", queuer.bridgeParameters.get("jenkins.job"));
-    assertEquals("job#4", queuer.bridgeParameters.get("jenkins.build.key"));
+    assertEquals("job#4@1710000000004", queuer.bridgeParameters.get("jenkins.build.key"));
+    assertEquals("1710000000004", queuer.bridgeParameters.get("jenkins.build.timestamp"));
     assertEquals("feature/x", queuer.jenkinsParameters.get("BRANCH"));
   }
 
@@ -90,6 +91,7 @@ public class TeamCityBuildMirrorServiceTest {
 
   private JenkinsBuildInfo buildInfo(int number) {
     String json = "{\"number\":" + number + ",\"building\":true,"
+        + "\"timestamp\":" + (1710000000000L + number) + ","
         + "\"url\":\"http://jenkins/job/job/" + number + "/\"}";
     return JenkinsBuildInfo.fromJson(parser.parse(json).getAsJsonObject());
   }

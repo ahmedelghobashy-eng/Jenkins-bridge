@@ -18,6 +18,7 @@ import com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildMirrorService;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -135,58 +136,63 @@ public class JenkinsBridgePollingService {
     String keyPrefix = mirroredJob.getMirrorKeyPrefix();
     int recentBuildLimit = mirroredJob.getEffectiveRecentBuildLimit(settings.getRecentBuildLimit());
 
-    // Fetch the most recent build numbers (Jenkins caps this at the 100 newest).
-    List<Integer> numbers = jenkinsClient.getBuildNumbers(job);
-    if (numbers.isEmpty()) {
+    // Fetch the most recent builds (Jenkins caps this at the 100 newest). The timestamp is part of
+    // the bridge identity because Jenkins build numbers can be reused after build history is reset.
+    List<JenkinsBuildInfo> builds = jenkinsClient.getBuilds(job);
+    if (builds.isEmpty()) {
       LOG.info("[Jenkins Bridge DEBUG] Jenkins job " + job + " has no builds yet");
       return;
     }
 
-    int latest = Collections.max(numbers);
+    int latest = maxBuildNumber(builds);
+    int oldest = minBuildNumber(builds);
     int lastSeen = mirrorStore.getLastSeenBuildNumber(keyPrefix);
+    int coldStartAfter = lastSeen;
+    boolean coldStart = lastSeen == 0;
+    boolean resetDetected = false;
 
-    if (lastSeen == 0) {
+    if (coldStart) {
       // Cold start: don't replay the whole history. Backfill only the most recent builds, where
       // recentBuildLimit is the backfill depth (default 1 = start from the latest build).
-      lastSeen = Math.max(0, latest - recentBuildLimit);
+      coldStartAfter = Math.max(0, latest - recentBuildLimit);
       LOG.info("[Jenkins Bridge DEBUG] Cold start for job " + job
-          + "; backfilling from build " + (lastSeen + 1) + " (latest=" + latest + ")");
-    } else if (Collections.min(numbers) > lastSeen + 1) {
+          + "; backfilling from build " + (coldStartAfter + 1) + " (latest=" + latest + ")");
+    } else if (latest < lastSeen) {
+      resetDetected = true;
+      LOG.warning("Jenkins Bridge detected build-number reset for job " + job
+          + " (lastSeen=" + lastSeen + ", latest=" + latest
+          + "); processing recent builds by timestamped identity");
+    } else if (oldest > lastSeen + 1) {
       // We were running before but more than ~100 builds have happened since, so the cheap
-      // builds[number] view no longer reaches back to lastSeen. Escalate to allBuilds so we
+      // builds view no longer reaches back to lastSeen. Escalate to allBuilds so we
       // never skip a build (rare; only after a long outage).
       LOG.info("[Jenkins Bridge DEBUG] Gap detected for job " + job
-          + " (lastSeen=" + lastSeen + ", oldest fetched=" + Collections.min(numbers)
+          + " (lastSeen=" + lastSeen + ", oldest fetched=" + oldest
           + "); fetching all build numbers");
-      numbers = jenkinsClient.getAllBuildNumbers(job);
+      builds = jenkinsClient.getAllBuilds(job);
+      if (builds.isEmpty()) {
+        return;
+      }
+      latest = maxBuildNumber(builds);
     }
 
-    // Process every build strictly after the watermark, oldest first.
-    // TODO caveat : the builds in Jenkins restart after a certain limit. This has to be considered.
-    List<Integer> toProcess = new ArrayList<Integer>();
-    for (Integer number : numbers) {
-      if (number > lastSeen) {
-        toProcess.add(number);
+    List<JenkinsBuildInfo> toProcess = new ArrayList<JenkinsBuildInfo>();
+    for (JenkinsBuildInfo build : builds) {
+      if (shouldProcessDiscoveredBuild(build, keyPrefix, lastSeen, coldStartAfter, coldStart, resetDetected)) {
+        toProcess.add(build);
       }
     }
-    Collections.sort(toProcess);
+    sortByBuildNumber(toProcess);
     LOG.info("[Jenkins Bridge DEBUG] " + mirroredJob.describeForLog() + ": " + toProcess.size()
-        + " build(s) after watermark " + lastSeen);
+        + " build(s) selected after watermark " + lastSeen);
 
     Set<Integer> handled = new HashSet<Integer>();
     int maxNumber = lastSeen;
 
-    for (Integer number : toProcess) {
-      maxNumber = Math.max(maxNumber, number);
-
-      BuildMirror existing = mirrorStore.findMirror(BuildMirrorStore.buildKey(keyPrefix, number));
-      if (existing != null && existing.getSyncState() == SyncState.TEAMCITY_FINISHED) {
-        // Already mirrored and finished: account for it (advance watermark) without any Jenkins calls (P2).
-        continue;
-      }
-
-      syncOneBuild(mirroredJob, number);
-      handled.add(number);
+    for (JenkinsBuildInfo build : toProcess) {
+      maxNumber = Math.max(maxNumber, build.getNumber());
+      syncDiscoveredBuild(mirroredJob, build);
+      handled.add(build.getNumber());
     }
 
     // Keep syncing builds that are still in progress but already past the watermark.
@@ -197,21 +203,52 @@ public class JenkinsBridgePollingService {
       if (handled.contains(mirror.getJenkinsBuildNumber())) {
         continue;
       }
-      syncOneBuild(mirroredJob, mirror.getJenkinsBuildNumber());
+      syncActiveMirror(mirror);
     }
 
-    if (maxNumber > mirrorStore.getLastSeenBuildNumber(keyPrefix)) {
+    if (!resetDetected && maxNumber > mirrorStore.getLastSeenBuildNumber(keyPrefix)) {
       mirrorStore.setLastSeenBuildNumber(keyPrefix, maxNumber);
     }
   }
 
-  // Syncs a single Jenkins build, isolating failures so one bad build does not abort the poll cycle.
-  private void syncOneBuild(MirroredJob mirroredJob, int buildNumber) {
+  private boolean shouldProcessDiscoveredBuild(
+      JenkinsBuildInfo build,
+      String keyPrefix,
+      int lastSeen,
+      int coldStartAfter,
+      boolean coldStart,
+      boolean resetDetected
+  ) throws Exception {
+    String currentKey = BuildMirrorStore.buildKey(keyPrefix, build);
+    BuildMirror current = mirrorStore.findMirror(currentKey);
+    if (current != null) {
+      return current.getSyncState() != SyncState.TEAMCITY_FINISHED;
+    }
+
+    if (coldStart) {
+      return build.getNumber() > coldStartAfter;
+    }
+
+    if (resetDetected) {
+      return true;
+    }
+
+    if (build.getNumber() <= lastSeen) {
+      return false;
+    }
+
+    BuildMirror legacy = mirrorStore.findMirror(BuildMirrorStore.buildKey(keyPrefix, build.getNumber()));
+    return legacy == null;
+  }
+
+  // Syncs a newly discovered Jenkins build, isolating failures so one bad build does not abort the poll cycle.
+  private void syncDiscoveredBuild(MirroredJob mirroredJob, JenkinsBuildInfo discoveredBuild) {
     String job = mirroredJob.getJenkinsJob();
     BuildMirror mirror = null;
+    int buildNumber = discoveredBuild.getNumber();
     try {
       JenkinsBuildInfo buildInfo = jenkinsClient.getBuildInfo(job, buildNumber);
-      String mirrorKey = BuildMirrorStore.buildKey(mirroredJob.getMirrorKeyPrefix(), buildNumber);
+      String mirrorKey = BuildMirrorStore.buildKey(mirroredJob.getMirrorKeyPrefix(), buildInfo);
       mirror = mirrorStore.getOrCreateMirror(mirrorKey, job, mirroredJob.getTeamCityBuildTypeExternalId(), buildInfo);
       LOG.info("[Jenkins Bridge DEBUG] Syncing Jenkins build " + mirror.getJenkinsBuildKey()
           + " in state " + mirror.getSyncState()
@@ -226,6 +263,54 @@ public class JenkinsBridgePollingService {
       }
       LOG.log(Level.WARNING, "Failed to sync Jenkins build " + job + "#" + buildNumber, e);
     }
+  }
+
+  private void syncActiveMirror(BuildMirror mirror) {
+    try {
+      JenkinsBuildInfo buildInfo = jenkinsClient.getBuildInfo(mirror.getJenkinsJob(), mirror.getJenkinsBuildNumber());
+      if (mirror.getJenkinsBuildTimestamp() > 0L
+          && buildInfo.getTimestamp() > 0L
+          && mirror.getJenkinsBuildTimestamp() != buildInfo.getTimestamp()) {
+        LOG.warning("Skipping active Jenkins mirror " + mirror.getJenkinsBuildKey()
+            + " because Jenkins now reports build #" + mirror.getJenkinsBuildNumber()
+            + " with timestamp " + buildInfo.getTimestamp()
+            + " instead of " + mirror.getJenkinsBuildTimestamp()
+            + "; the build number appears to have been reused");
+        return;
+      }
+      syncBuild(mirror, buildInfo);
+    } catch (Exception e) {
+      mirrorStore.markBuildError(mirror, e);
+      LOG.log(Level.WARNING, "Failed to sync Jenkins build " + mirror.getJenkinsBuildKey(), e);
+    }
+  }
+
+  private int maxBuildNumber(List<JenkinsBuildInfo> builds) {
+    int max = 0;
+    for (JenkinsBuildInfo build : builds) {
+      max = Math.max(max, build.getNumber());
+    }
+    return max;
+  }
+
+  private int minBuildNumber(List<JenkinsBuildInfo> builds) {
+    int min = Integer.MAX_VALUE;
+    for (JenkinsBuildInfo build : builds) {
+      min = Math.min(min, build.getNumber());
+    }
+    return min == Integer.MAX_VALUE ? 0 : min;
+  }
+
+  private void sortByBuildNumber(List<JenkinsBuildInfo> builds) {
+    Collections.sort(builds, new Comparator<JenkinsBuildInfo>() {
+      public int compare(JenkinsBuildInfo left, JenkinsBuildInfo right) {
+        int numberComparison = Integer.valueOf(left.getNumber()).compareTo(Integer.valueOf(right.getNumber()));
+        if (numberComparison != 0) {
+          return numberComparison;
+        }
+        return Long.valueOf(left.getTimestamp()).compareTo(Long.valueOf(right.getTimestamp()));
+      }
+    });
   }
 
   private void syncBuild(BuildMirror mirror, JenkinsBuildInfo buildInfo) throws Exception {

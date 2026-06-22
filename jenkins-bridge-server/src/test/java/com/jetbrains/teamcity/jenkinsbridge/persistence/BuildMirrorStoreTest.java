@@ -26,6 +26,18 @@ import static org.junit.Assert.assertTrue;
 
 public class BuildMirrorStoreTest {
   @Test
+  public void timestampedBuildKeyDistinguishesReusedJenkinsBuildNumbers() {
+    assertEquals("job#7@1710000000007", BuildMirrorStore.buildKey("job", buildInfo(7, 1710000000007L)));
+    assertEquals("job#7@1710000000999", BuildMirrorStore.buildKey("job", buildInfo(7, 1710000000999L)));
+    assertEquals("job#7", BuildMirrorStore.legacyBuildKey("job#7@1710000000007"));
+  }
+
+  @Test
+  public void buildKeyFallsBackToLegacyWhenJenkinsTimestampIsMissing() {
+    assertEquals("job#7", BuildMirrorStore.buildKey("job", buildInfo(7, 0L)));
+  }
+
+  @Test
   public void lastSeenBuildNumberPersistsAndIsMonotonic() throws Exception {
     JenkinsBridgeSettingsProvider provider = providerWithTempStateFile();
     BuildMirrorStore store = new BuildMirrorStore(null, provider);
@@ -178,8 +190,13 @@ public class BuildMirrorStoreTest {
   }
 
   private static JenkinsBuildInfo buildInfo(int number) {
+    return buildInfo(number, 0L);
+  }
+
+  private static JenkinsBuildInfo buildInfo(int number, long timestamp) {
     JsonObject json = new JsonObject();
     json.addProperty("number", number);
+    json.addProperty("timestamp", timestamp);
     json.addProperty("building", true);
     return JenkinsBuildInfo.fromJson(json);
   }

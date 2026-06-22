@@ -56,7 +56,9 @@
  job the bridge starts from (latest build - recentBuildLimit), so it mirrors only
  the most recent build(s) instead of replaying the whole Jenkins history. After
  that, polling is incremental by build number (every build after the last one is
- picked up), so this value no longer bounds steady-state discovery.
+ picked up), so this value no longer bounds steady-state discovery. If Jenkins
+ build numbers are reset/reused after history deletion, the bridge identifies
+ new runs by build number plus Jenkins' exported build timestamp.
 
  The default state file is stored in TeamCity plugin data:
 

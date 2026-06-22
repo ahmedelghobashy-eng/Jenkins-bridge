@@ -127,6 +127,7 @@ public class TeamCityPipelineChainService {
       setConfigParameter(buildType, "jenkins.job", mirror.getJenkinsJob());
       setConfigParameter(buildType, "jenkins.build.number", String.valueOf(mirror.getJenkinsBuildNumber()));
       setConfigParameter(buildType, "jenkins.build.key", mirror.getJenkinsBuildKey());
+      setConfigParameter(buildType, "jenkins.build.timestamp", String.valueOf(mirror.getJenkinsBuildTimestamp()));
       setConfigParameter(buildType, "jenkins.build.url", nullToEmpty(mirror.getJenkinsBuildUrl()));
       setConfigParameter(buildType, "jenkins.flow.id", node.getFlowId());
       setConfigParameter(buildType, "jenkins.flow.node.id", node.getNodeId());
@@ -274,6 +275,7 @@ public class TeamCityPipelineChainService {
     Map<String, String> parameters = new LinkedHashMap<String, String>();
     parameters.put("jenkins.job", mirror.getJenkinsJob());
     parameters.put("jenkins.build.number", String.valueOf(mirror.getJenkinsBuildNumber()));
+    parameters.put("jenkins.build.timestamp", String.valueOf(mirror.getJenkinsBuildTimestamp()));
     parameters.put("jenkins.build.key", mirror.getJenkinsBuildKey());
     parameters.put("jenkins.build.url", nullToEmpty(mirror.getJenkinsBuildUrl()));
     return parameters;

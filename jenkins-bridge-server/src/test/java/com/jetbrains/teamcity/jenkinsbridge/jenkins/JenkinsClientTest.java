@@ -3,6 +3,7 @@ package com.jetbrains.teamcity.jenkinsbridge.jenkins;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpClient;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpException;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpResponse;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsCrumb;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildParameters;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsJobParameters;
@@ -119,6 +120,24 @@ public class JenkinsClientTest {
   }
 
   @Test
+  public void getBuildsUsesBuildsTreeAndParsesIdentityMetadata() throws Exception {
+    StubResponseHttpClient httpClient = new StubResponseHttpClient();
+    httpClient.body = "{\"builds\":["
+        + "{\"number\":50,\"timestamp\":1710000000050,\"url\":\"http://jenkins/job/job/50/\"},"
+        + "{\"number\":49,\"timestamp\":1710000000049,\"url\":\"http://jenkins/job/job/49/\"}"
+        + "]}";
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    List<JenkinsBuildInfo> builds = client.getBuilds("folder/job");
+
+    assertEquals("http://jenkins/job/folder/job/job/api/json?tree=builds%5Bnumber%2Ctimestamp%2Curl%5D", httpClient.url);
+    assertEquals(2, builds.size());
+    assertEquals(50, builds.get(0).getNumber());
+    assertEquals(1710000000050L, builds.get(0).getTimestamp());
+    assertEquals("http://jenkins/job/job/50/", builds.get(0).getUrl());
+  }
+
+  @Test
   public void getAllBuildNumbersUsesAllBuildsTree() throws Exception {
     StubResponseHttpClient httpClient = new StubResponseHttpClient();
     httpClient.body = "{\"allBuilds\":[{\"number\":2},{\"number\":1}]}";
@@ -129,6 +148,21 @@ public class JenkinsClientTest {
     assertEquals("http://jenkins/job/job/api/json?tree=allBuilds%5Bnumber%5D", httpClient.url);
     assertEquals(Arrays.asList(2, 1), numbers);
   }
+
+  @Test
+  public void getAllBuildsUsesAllBuildsTreeAndParsesIdentityMetadata() throws Exception {
+    StubResponseHttpClient httpClient = new StubResponseHttpClient();
+    httpClient.body = "{\"allBuilds\":[{\"number\":2,\"timestamp\":1710000000002}]}";
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    List<JenkinsBuildInfo> builds = client.getAllBuilds("job");
+
+    assertEquals("http://jenkins/job/job/api/json?tree=allBuilds%5Bnumber%2Ctimestamp%2Curl%5D", httpClient.url);
+    assertEquals(1, builds.size());
+    assertEquals(2, builds.get(0).getNumber());
+    assertEquals(1710000000002L, builds.get(0).getTimestamp());
+  }
+
 
   @Test
   public void listJobsBuildsRootUrlWhenFolderBlank() throws Exception {
