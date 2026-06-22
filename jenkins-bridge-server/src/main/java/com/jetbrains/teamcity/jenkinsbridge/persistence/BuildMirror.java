@@ -4,6 +4,7 @@ import com.google.gson.annotations.SerializedName;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsPipelineGraph;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -36,6 +37,8 @@ public class BuildMirror {
   private boolean metadataLogSent;
   private boolean summaryLogSent;
   private boolean testsSynced;
+  private boolean jenkinsBuildParametersLoaded;
+  private Map<String, String> jenkinsBuildParameters;
   private String jenkinsResult;
   private String teamCityFinishDate;
   private String lastError;
@@ -60,6 +63,7 @@ public class BuildMirror {
     mirror.metadataLogSent = false;
     mirror.summaryLogSent = false;
     mirror.testsSynced = false;
+    mirror.jenkinsBuildParametersLoaded = false;
     mirror.createdAt = now;
     mirror.updatedAt = now;
     return mirror;
@@ -178,6 +182,26 @@ public class BuildMirror {
 
   public void setTestsSynced(boolean testsSynced) {
     this.testsSynced = testsSynced;
+  }
+
+  public boolean isJenkinsBuildParametersLoaded() {
+    return jenkinsBuildParametersLoaded;
+  }
+
+  public Map<String, String> getJenkinsBuildParameters() {
+    if (jenkinsBuildParameters == null || jenkinsBuildParameters.isEmpty()) {
+      return Collections.emptyMap();
+    }
+    return Collections.unmodifiableMap(jenkinsBuildParameters);
+  }
+
+  public void setJenkinsBuildParameters(Map<String, String> jenkinsBuildParameters) {
+    if (jenkinsBuildParameters == null || jenkinsBuildParameters.isEmpty()) {
+      this.jenkinsBuildParameters = new LinkedHashMap<String, String>();
+    } else {
+      this.jenkinsBuildParameters = new LinkedHashMap<String, String>(jenkinsBuildParameters);
+    }
+    this.jenkinsBuildParametersLoaded = true;
   }
 
   public String getJenkinsResult() {

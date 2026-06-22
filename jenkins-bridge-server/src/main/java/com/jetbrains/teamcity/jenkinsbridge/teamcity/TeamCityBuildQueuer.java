@@ -7,11 +7,11 @@ import jetbrains.buildServer.serverSide.ProjectManager;
 import jetbrains.buildServer.serverSide.SBuildType;
 import jetbrains.buildServer.serverSide.SQueuedBuild;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 public class TeamCityBuildQueuer {
-  private static final String AGENTLESS_BUILD_PROPERTY = "teamcity.build.agentLess";
   private static final String TRIGGERED_BY = "Jenkins Bridge";
 
   private final ProjectManager projectManager;
@@ -23,6 +23,14 @@ public class TeamCityBuildQueuer {
   }
 
   public long queueAgentlessBuild(String buildTypeId, Map<String, String> properties) {
+    return queueAgentlessBuild(buildTypeId, properties, Collections.<String, String>emptyMap());
+  }
+
+  public long queueAgentlessBuild(
+      String buildTypeId,
+      Map<String, String> properties,
+      Map<String, String> jenkinsBuildParameters
+  ) {
     SBuildType buildType = findBuildType(buildTypeId);
     if (buildType == null) {
       throw new IllegalStateException("TeamCity build type " + buildTypeId + " was not found");
@@ -30,8 +38,11 @@ public class TeamCityBuildQueuer {
 
 
     Map<String, String> parameters = new LinkedHashMap<String, String>();
-    parameters.put(AGENTLESS_BUILD_PROPERTY, "true");
-    parameters.putAll(properties);
+    parameters.put(TeamCityBuildParameters.AGENTLESS_BUILD_PROPERTY, "true");
+    parameters.putAll(TeamCityBuildParameters.mergeWithJenkinsParameters(
+        properties,
+        jenkinsBuildParameters,
+        buildType.getParametersProvider().getAll().keySet()));
 
     BuildCustomizer customizer = buildCustomizerFactory.createBuildCustomizer(buildType, null);
     customizer.setParameters(parameters);

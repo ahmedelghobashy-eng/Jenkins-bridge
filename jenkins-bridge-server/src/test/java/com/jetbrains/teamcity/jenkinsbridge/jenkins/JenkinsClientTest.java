@@ -4,6 +4,7 @@ import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpClient;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpException;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpResponse;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsCrumb;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildParameters;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsJobParameters;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsLogChunk;
 import com.jetbrains.teamcity.jenkinsbridge.model.GraphConfidence;
@@ -387,6 +388,53 @@ public class JenkinsClientTest {
     assertEquals("BRANCH", params.getParameters().get(0).getName());
     assertEquals("main", params.getParameters().get(0).getDefaultValue());
     assertEquals(Arrays.asList("dev", "prod"), params.getParameters().get(1).getChoices());
+  }
+
+  @Test
+  public void getBuildParametersParsesRunValues() throws Exception {
+    StubResponseHttpClient httpClient = new StubResponseHttpClient();
+    httpClient.body = "{\"actions\":[{},"
+        + "{\"_class\":\"hudson.model.ParametersAction\",\"parameters\":["
+        + "{\"_class\":\"hudson.model.StringParameterValue\",\"name\":\"BRANCH\",\"value\":\"feature/x\"},"
+        + "{\"_class\":\"hudson.model.BooleanParameterValue\",\"name\":\"RUN_TESTS\",\"value\":true},"
+        + "{\"_class\":\"hudson.model.IntegerParameterValue\",\"name\":\"RETRIES\",\"value\":2},"
+        + "{\"_class\":\"hudson.model.RunParameterValue\",\"name\":\"UPSTREAM_RUN\",\"value\":\"folder/job#42\"},"
+        + "{\"_class\":\"custom.ComplexParameterValue\",\"name\":\"COMPLEX\",\"value\":{\"nested\":\"ignored\"}},"
+        + "{\"_class\":\"hudson.model.StringParameterValue\",\"name\":\"EMPTY\",\"value\":null}"
+        + "]}]}";
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    JenkinsBuildParameters params = client.getBuildParameters("folder/job", 12);
+
+    assertEquals("http://jenkins/job/folder/job/job/12/api/json?tree=actions%5Bparameters%5Bname%2Cvalue%2C_class%5D%5D",
+        httpClient.url);
+    assertEquals(6, params.getParameters().size());
+    assertEquals("hudson.model.RunParameterValue", params.getParameters().get(3).getParameterClass());
+    assertEquals("feature/x", params.asMap().get("BRANCH"));
+    assertEquals("true", params.asMap().get("RUN_TESTS"));
+    assertEquals("2", params.asMap().get("RETRIES"));
+    assertEquals("folder/job#42", params.asMap().get("UPSTREAM_RUN"));
+    assertEquals("", params.asMap().get("COMPLEX"));
+    assertEquals("", params.asMap().get("EMPTY"));
+  }
+
+  @Test
+  public void getBuildParametersReturnsEmptyWhenNoParametersActionExists() throws Exception {
+    StubResponseHttpClient httpClient = new StubResponseHttpClient();
+    httpClient.body = "{\"actions\":[{},{}]}";
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    assertTrue(client.getBuildParameters("job", 5).isEmpty());
+  }
+
+  @Test
+  public void getBuildParametersReturnsEmptyOn404() throws Exception {
+    NotFoundHttpClient httpClient = new NotFoundHttpClient();
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    assertTrue(client.getBuildParameters("job", 5).isEmpty());
+    assertEquals("http://jenkins/job/job/5/api/json?tree=actions%5Bparameters%5Bname%2Cvalue%2C_class%5D%5D",
+        httpClient.url);
   }
 
   @Test

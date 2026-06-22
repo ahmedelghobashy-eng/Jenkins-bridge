@@ -223,7 +223,10 @@ public class TeamCityPipelineChainService {
     if (!(customizer instanceof BuildCustomizerEx)) {
       throw new IllegalStateException("TeamCity BuildCustomizer does not support dynamic Jenkins Pipeline dependencies");
     }
-    customizer.setParameters(topBuildParameters(mirror));
+    customizer.setParameters(TeamCityBuildParameters.mergeWithJenkinsParameters(
+        topBuildParameters(mirror),
+        mirror.getJenkinsBuildParameters(),
+        sourceBuildType.getParametersProvider().getAll().keySet()));
     customizer.setRebuildDependencies(true);
     ((BuildCustomizerEx) customizer).setDependenciesSupplier(
         dependenciesSupplier(plan, buildTypesByNodeId, sourceBuildType));

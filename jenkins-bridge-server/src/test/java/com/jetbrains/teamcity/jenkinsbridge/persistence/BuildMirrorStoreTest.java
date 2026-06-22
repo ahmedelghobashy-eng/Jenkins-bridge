@@ -109,6 +109,27 @@ public class BuildMirrorStoreTest {
   }
 
   @Test
+  public void jenkinsBuildParametersPersistAcrossReload() throws Exception {
+    JenkinsBridgeSettingsProvider provider = providerWithTempStateFile();
+    BuildMirrorStore store = new BuildMirrorStore(null, provider);
+    BuildMirror mirror = store.getOrCreateMirror(BuildMirrorStore.buildKey("job", 9), "job", "buildType", buildInfo(9));
+
+    Map<String, String> parameters = new LinkedHashMap<String, String>();
+    parameters.put("BRANCH", "feature/x");
+    parameters.put("RUN_TESTS", "true");
+    mirror.setJenkinsBuildParameters(parameters);
+    store.saveMirror(mirror);
+
+    BuildMirrorStore reloaded = new BuildMirrorStore(null, provider);
+    BuildMirror restored = reloaded.findMirror(BuildMirrorStore.buildKey("job", 9));
+
+    assertNotNull(restored);
+    assertTrue(restored.isJenkinsBuildParametersLoaded());
+    assertEquals("feature/x", restored.getJenkinsBuildParameters().get("BRANCH"));
+    assertEquals("true", restored.getJenkinsBuildParameters().get("RUN_TESTS"));
+  }
+
+  @Test
   public void pipelineChainSnapshotPersistsAcrossReload() throws Exception {
     JenkinsBridgeSettingsProvider provider = providerWithTempStateFile();
     BuildMirrorStore store = new BuildMirrorStore(null, provider);

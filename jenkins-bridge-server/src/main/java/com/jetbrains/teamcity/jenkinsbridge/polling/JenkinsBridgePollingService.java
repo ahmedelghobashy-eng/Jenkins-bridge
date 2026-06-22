@@ -6,6 +6,7 @@ import com.jetbrains.teamcity.jenkinsbridge.persistence.BuildMirror;
 import com.jetbrains.teamcity.jenkinsbridge.persistence.BuildMirrorStore;
 import com.jetbrains.teamcity.jenkinsbridge.persistence.SyncState;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildParameters;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsLogChunk;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsPipelineGraph;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStages;
@@ -260,6 +261,8 @@ public class JenkinsBridgePollingService {
       }
     }
 
+    ensureJenkinsBuildParametersLoaded(mirror);
+
     long teamCityBuildId = mirrorService.ensureTeamCityBuild(mirror, buildInfo, graph);
     mirrorService.ensureRunningDataSent(mirror, teamCityBuildId);
     mirrorService.ensureMetadataLogSent(mirror, teamCityBuildId);
@@ -291,5 +294,18 @@ public class JenkinsBridgePollingService {
       mirrorService.syncTestsIfNeeded(mirror, teamCityBuildId, testReport);
     }
     mirrorService.finishBuildIfNeeded(mirror, teamCityBuildId, buildInfo);
+  }
+
+  private void ensureJenkinsBuildParametersLoaded(BuildMirror mirror) throws Exception {
+    if (mirror.getTeamCityBuildId() != null || mirror.isJenkinsBuildParametersLoaded()) {
+      return;
+    }
+
+    JenkinsBuildParameters parameters =
+        jenkinsClient.getBuildParameters(mirror.getJenkinsJob(), mirror.getJenkinsBuildNumber());
+    mirror.setJenkinsBuildParameters(parameters.asMap());
+    mirrorStore.saveMirror(mirror);
+    LOG.info("[Jenkins Bridge DEBUG] Read " + parameters.getParameters().size()
+        + " Jenkins build parameter(s) for " + mirror.getJenkinsBuildKey());
   }
 }

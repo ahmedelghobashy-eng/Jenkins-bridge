@@ -126,19 +126,26 @@ public class TeamCityBuildMirrorService {
     // Else create a new build (with the build queuer) and return the build ID
 
 
-    // Prepare the build properties
-    Map<String, String> properties = new LinkedHashMap<String, String>();
-    properties.put("jenkins.job", mirror.getJenkinsJob());
-    properties.put("jenkins.build.number", String.valueOf(mirror.getJenkinsBuildNumber()));
-    properties.put("jenkins.build.key", mirror.getJenkinsBuildKey());
-    properties.put("jenkins.build.url", nullToEmpty(jenkinsInfo.getUrl()));
+    Map<String, String> properties = bridgeBuildParameters(mirror, jenkinsInfo);
 
-    long buildId = teamCityBuildQueuer.queueAgentlessBuild(mirror.getTeamCityBuildTypeId(), properties);
+    long buildId = teamCityBuildQueuer.queueAgentlessBuild(
+        mirror.getTeamCityBuildTypeId(),
+        properties,
+        mirror.getJenkinsBuildParameters());
     mirror.setTeamCityBuildId(buildId);
     mirror.setSyncState(SyncState.TEAMCITY_CREATED);
     mirror.setLastError(null);
     mirrorStore.saveMirror(mirror);
     return buildId;
+  }
+
+  Map<String, String> bridgeBuildParameters(BuildMirror mirror, JenkinsBuildInfo jenkinsInfo) {
+    Map<String, String> properties = new LinkedHashMap<String, String>();
+    properties.put("jenkins.job", mirror.getJenkinsJob());
+    properties.put("jenkins.build.number", String.valueOf(mirror.getJenkinsBuildNumber()));
+    properties.put("jenkins.build.key", mirror.getJenkinsBuildKey());
+    properties.put("jenkins.build.url", nullToEmpty(jenkinsInfo.getUrl()));
+    return properties;
   }
 
   public void ensureRunningDataSent(BuildMirror mirror, long teamCityBuildId)

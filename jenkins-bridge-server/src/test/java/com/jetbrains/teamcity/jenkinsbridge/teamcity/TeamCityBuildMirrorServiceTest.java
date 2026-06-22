@@ -2,6 +2,8 @@ package com.jetbrains.teamcity.jenkinsbridge.teamcity;
 
 import com.google.gson.JsonParser;
 import com.jetbrains.teamcity.jenkinsbridge.jenkins.JenkinsClient;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsPipelineGraph;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStageLog;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStages;
 import com.jetbrains.teamcity.jenkinsbridge.persistence.BuildMirror;
@@ -11,7 +13,9 @@ import jetbrains.buildServer.messages.DefaultMessagesInfo;
 import org.junit.Test;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -60,10 +64,34 @@ public class TeamCityBuildMirrorServiceTest {
     assertEquals("FAILURE", TeamCityBuildMirrorService.jenkinsResultForPipelineNodeStatus("NOT_EXECUTED"));
   }
 
+  @Test
+  public void ensureTeamCityBuildPassesSavedJenkinsParametersToQueuer() throws Exception {
+    CapturingQueuer queuer = new CapturingQueuer();
+    TeamCityBuildMirrorService service = new TeamCityBuildMirrorService(
+        null, new NoExistingBuildClient(), queuer, null, null, null, null, null, null, new NoopStore());
+
+    BuildMirror mirror = BuildMirror.create("job#4", "job", buildInfo(4), "buildType", "now");
+    Map<String, String> parameters = new LinkedHashMap<String, String>();
+    parameters.put("BRANCH", "feature/x");
+    mirror.setJenkinsBuildParameters(parameters);
+
+    service.ensureTeamCityBuild(mirror, buildInfo(4), null);
+
+    assertEquals("job", queuer.bridgeParameters.get("jenkins.job"));
+    assertEquals("job#4", queuer.bridgeParameters.get("jenkins.build.key"));
+    assertEquals("feature/x", queuer.jenkinsParameters.get("BRANCH"));
+  }
+
   private JenkinsStages stages(String name, String status, long start, long duration) {
     String json = "{\"stages\":[{\"id\":\"6\",\"name\":\"" + name + "\",\"status\":\"" + status
         + "\",\"startTimeMillis\":" + start + ",\"durationMillis\":" + duration + "}]}";
     return JenkinsStages.fromJson(parser.parse(json).getAsJsonObject());
+  }
+
+  private JenkinsBuildInfo buildInfo(int number) {
+    String json = "{\"number\":" + number + ",\"building\":true,"
+        + "\"url\":\"http://jenkins/job/job/" + number + "/\"}";
+    return JenkinsBuildInfo.fromJson(parser.parse(json).getAsJsonObject());
   }
 
   private static class CapturingStageReporter extends TeamCityStageReporter {
@@ -100,6 +128,37 @@ public class TeamCityBuildMirrorServiceTest {
     @Override
     public void saveMirror(BuildMirror mirror) {
       // no-op: tests assert on the in-memory mirror, not on disk
+    }
+  }
+
+  private static class NoExistingBuildClient extends TeamCityClient {
+    NoExistingBuildClient() {
+      super(null, null);
+    }
+
+    @Override
+    public Long findBuildIdByJenkinsBuildKey(String jenkinsBuildKey) {
+      return null;
+    }
+  }
+
+  private static class CapturingQueuer extends TeamCityBuildQueuer {
+    Map<String, String> bridgeParameters;
+    Map<String, String> jenkinsParameters;
+
+    CapturingQueuer() {
+      super(null, null);
+    }
+
+    @Override
+    public long queueAgentlessBuild(
+        String buildTypeId,
+        Map<String, String> properties,
+        Map<String, String> jenkinsBuildParameters
+    ) {
+      bridgeParameters = new LinkedHashMap<String, String>(properties);
+      jenkinsParameters = new LinkedHashMap<String, String>(jenkinsBuildParameters);
+      return 55L;
     }
   }
 }

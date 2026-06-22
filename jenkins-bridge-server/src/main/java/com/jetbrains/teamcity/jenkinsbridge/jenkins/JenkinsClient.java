@@ -9,6 +9,7 @@ import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpException;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpResponse;
 import com.jetbrains.teamcity.jenkinsbridge.model.GraphConfidence;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildParameters;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsCrumb;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsJobParameters;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsLogChunk;
@@ -627,6 +628,31 @@ public class JenkinsClient {
     } catch (BridgeHttpException e) {
       if (e.getStatusCode() == 404) {
         return JenkinsJobParameters.empty();
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Reads the parameter values attached to one concrete Jenkins build run. Empty for
+   * non-parameterized builds, builds whose ParametersAction is absent, or a {@code 404}.
+   */
+  public JenkinsBuildParameters getBuildParameters(String jobName, int buildNumber) throws BridgeHttpException {
+    JenkinsBridgeSettings settings = settingsProvider.load();
+    String tree = "actions[parameters[name,value,_class]]";
+    String url = settings.getJenkinsUrl()
+        + jenkinsJobPath(jobName)
+        + "/"
+        + buildNumber
+        + "/api/json?tree="
+        + encodeQueryValue(tree);
+
+    try {
+      String response = httpClient.get(url, settings.getJenkinsUser(), settings.getJenkinsToken(), "application/json");
+      return JenkinsBuildParameters.fromJson(jsonParser.parse(response).getAsJsonObject());
+    } catch (BridgeHttpException e) {
+      if (e.getStatusCode() == 404) {
+        return JenkinsBuildParameters.empty();
       }
       throw e;
     }
