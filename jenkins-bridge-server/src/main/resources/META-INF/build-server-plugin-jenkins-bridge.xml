@@ -33,6 +33,9 @@
   <bean id="teamCityStageReporter"
         class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityStageReporter"/>
 
+  <bean id="teamCityArtifactPublisher"
+        class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityArtifactPublisher"/>
+
   <bean id="teamCityBuildFinisher"
         class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildFinisher"/>
 

@@ -14,12 +14,21 @@ import java.util.List;
 import java.util.Map;
 
 public class BridgeHttpClient {
+  public interface StreamHandler {
+    void handle(InputStream inputStream) throws IOException;
+  }
+
   public String get(String url, String user, String password, String accept) throws BridgeHttpException {
     return getResponse(url, user, password, accept).getBody();
   }
 
   public BridgeHttpResponse getResponse(String url, String user, String password, String accept) throws BridgeHttpException {
     return request("GET", url, user, password, null, null, accept, null);
+  }
+
+  public void getStream(String url, String user, String password, String accept, StreamHandler handler)
+      throws BridgeHttpException {
+    requestStream("GET", url, user, password, accept, handler);
   }
 
   public String post(String url, String user, String password, String body, String contentType, String accept) throws BridgeHttpException {
@@ -99,6 +108,52 @@ public class BridgeHttpClient {
       }
 
       return new BridgeHttpResponse(status, responseBody, collectHeaders(connection));
+    } catch (IOException e) {
+      throw new BridgeHttpException(method, url, e);
+    } finally {
+      if (connection != null) {
+        connection.disconnect();
+      }
+    }
+  }
+
+  private void requestStream(
+      String method,
+      String url,
+      String user,
+      String password,
+      String accept,
+      StreamHandler handler
+  ) throws BridgeHttpException {
+    HttpURLConnection connection = null;
+    try {
+      connection = (HttpURLConnection)new URL(url).openConnection();
+      connection.setRequestMethod(method);
+      connection.setConnectTimeout(30000);
+      connection.setReadTimeout(30000);
+
+      if (isNotBlank(user)) {
+        String token = user + ":" + nullToEmpty(password);
+        String encoded = Base64.getEncoder().encodeToString(token.getBytes(StandardCharsets.UTF_8));
+        connection.setRequestProperty("Authorization", "Basic " + encoded);
+      }
+
+      if (isNotBlank(accept)) {
+        connection.setRequestProperty("Accept", accept);
+      }
+
+      int status = connection.getResponseCode();
+      if (status < 200 || status >= 300) {
+        String responseBody = readResponseBody(connection, status);
+        throw new BridgeHttpException(method, url, status, responseBody);
+      }
+
+      InputStream stream = connection.getInputStream();
+      try {
+        handler.handle(stream);
+      } finally {
+        stream.close();
+      }
     } catch (IOException e) {
       throw new BridgeHttpException(method, url, e);
     } finally {
