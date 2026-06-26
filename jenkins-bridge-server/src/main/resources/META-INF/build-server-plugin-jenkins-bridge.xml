@@ -66,6 +66,9 @@
   <bean id="jenkinsBuildResultExtension"
         class="com.jetbrains.teamcity.jenkinsbridge.web.JenkinsBuildResultExtension"/>
 
+  <bean id="jenkinsBuildSummaryExtension"
+        class="com.jetbrains.teamcity.jenkinsbridge.web.JenkinsBuildSummaryExtension"/>
+
   <bean id="teamCityBuildMirrorService"
         class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildMirrorService"/>
 
