@@ -64,10 +64,12 @@
         class="com.jetbrains.teamcity.jenkinsbridge.web.JenkinsTriggerTab"/>
 
   <bean id="jenkinsBuildResultExtension"
-        class="com.jetbrains.teamcity.jenkinsbridge.web.JenkinsBuildResultExtension"/>
+        class="com.jetbrains.teamcity.jenkinsbridge.web.JenkinsBuildResultExtension"
+        destroy-method="dispose"/>
 
   <bean id="jenkinsBuildSummaryExtension"
-        class="com.jetbrains.teamcity.jenkinsbridge.web.JenkinsBuildSummaryExtension"/>
+        class="com.jetbrains.teamcity.jenkinsbridge.web.JenkinsBuildSummaryExtension"
+        destroy-method="dispose"/>
 
   <bean id="teamCityBuildMirrorService"
         class="com.jetbrains.teamcity.jenkinsbridge.teamcity.TeamCityBuildMirrorService"/>

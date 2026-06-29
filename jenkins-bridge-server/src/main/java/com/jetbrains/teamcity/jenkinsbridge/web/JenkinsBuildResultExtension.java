@@ -51,7 +51,14 @@ public class JenkinsBuildResultExtension extends SimplePageExtension {
     super.fillModel(model, request);
     SBuild build = findBuild(request);
     if (build == null) return;
-    model.put("jenkinsUrl", build.getParametersProvider().get(PARAM_JENKINS_BUILD_URL));
+    String url = build.getParametersProvider().get(PARAM_JENKINS_BUILD_URL);
+    if (url != null && (url.startsWith("http://") || url.startsWith("https://"))) {
+      model.put("jenkinsUrl", url);
+    }
+  }
+
+  public void dispose() {
+    unregister();
   }
 
   @Nullable

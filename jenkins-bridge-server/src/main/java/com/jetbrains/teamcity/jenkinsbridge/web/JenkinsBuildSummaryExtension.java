@@ -23,6 +23,7 @@ public class JenkinsBuildSummaryExtension extends BaseController {
 
     private final PluginDescriptor pluginDescriptor;
     private final ProjectManager projectManager;
+    private final BuildSummaryPageExtension buildSummaryPageExtension;
 
     public JenkinsBuildSummaryExtension(
             @NotNull WebControllerManager webControllerManager,
@@ -33,7 +34,7 @@ public class JenkinsBuildSummaryExtension extends BaseController {
         this.pluginDescriptor = pluginDescriptor;
         this.projectManager = projectManager;
         webControllerManager.registerController(PATH, this);
-        new BuildSummaryPageExtension(pagePlaces);
+        this.buildSummaryPageExtension = new BuildSummaryPageExtension(pagePlaces);
     }
 
     @Nullable
@@ -45,6 +46,10 @@ public class JenkinsBuildSummaryExtension extends BaseController {
         ModelAndView mv = new ModelAndView(pluginDescriptor.getPluginResourcesPath("jenkinsBuildSummary.jsp"));
         mv.getModel().put("jenkinsUrl", url);
         return mv;
+    }
+
+    public void dispose() {
+        buildSummaryPageExtension.unregister();
     }
 
     private class BuildSummaryPageExtension extends SimplePageExtension {
@@ -68,7 +73,7 @@ public class JenkinsBuildSummaryExtension extends BaseController {
         SBuildType buildType = findBuildType(request);
         if (buildType == null) return null;
         if (buildType.getBuildFeaturesOfType(BridgeBuildFeatureConstants.TYPE).isEmpty()) return null;
-        List<SFinishedBuild> history = buildType.getHistory();
+        List<SFinishedBuild> history = buildType.getHistory(); // TODO: Find a way to not load the entire history
 
         return history.stream()
             .limit(NUM_BUILDS_TO_CHECK)
@@ -79,6 +84,10 @@ public class JenkinsBuildSummaryExtension extends BaseController {
             .orElse(null);
     }
 
+    /**
+     * IMPORTANT: Assumes the build URL has form ...[jobUrl]/[buildNumber].
+     * TODO: Add tests for Blue Ocean and matrix builds, where this approach may not work.
+     */
     @NotNull
     private static String stripRunNumber(@NotNull String buildUrl) {
         String urlNotEndingInSlash = buildUrl.endsWith("/") ? buildUrl.substring(0, buildUrl.length() - 1) : buildUrl;
