@@ -19,6 +19,7 @@ import java.util.List;
 public class JenkinsBuildSummaryExtension extends BaseController {
     static final String PATH = "/jenkinsBuildSummary.html";
     private static final String PARAM_JENKINS_BUILD_URL = "jenkins.build.url";
+    private static final int NUM_BUILDS_TO_CHECK = 10;
 
     private final PluginDescriptor pluginDescriptor;
     private final ProjectManager projectManager;
@@ -39,7 +40,7 @@ public class JenkinsBuildSummaryExtension extends BaseController {
     @Override
     protected ModelAndView doHandle(@NotNull HttpServletRequest request,
                                     @NotNull HttpServletResponse response) {
-        String url = jenkinsJobUrl(request);
+        String url = findJenkinsJobUrl(request);
         if (url == null) return null;
         ModelAndView mv = new ModelAndView(pluginDescriptor.getPluginResourcesPath("jenkinsBuildSummary.jsp"));
         mv.getModel().put("jenkinsUrl", url);
@@ -55,26 +56,27 @@ public class JenkinsBuildSummaryExtension extends BaseController {
 
         @Override
         public boolean isAvailable(@NotNull HttpServletRequest request) {
-            return jenkinsJobUrl(request) != null;
+            return findJenkinsJobUrl(request) != null;
         }
     }
 
     /**
-     * Loop through all previous runs to find one with a link to Jenkins, then remove the run number from the link to get the URL of the Jenkins job.
+     * Loop through previous runs up to {@value NUM_BUILDS_TO_CHECK} times to find one with a link to Jenkins, then remove the run number from the link to get the URL of the Jenkins job.
      */
     @Nullable
-    private String jenkinsJobUrl(@NotNull HttpServletRequest request) {
+    private String findJenkinsJobUrl(@NotNull HttpServletRequest request) {
         SBuildType buildType = findBuildType(request);
         if (buildType == null) return null;
         if (buildType.getBuildFeaturesOfType(BridgeBuildFeatureConstants.TYPE).isEmpty()) return null;
         List<SFinishedBuild> history = buildType.getHistory();
-        for (SFinishedBuild build : history) {
-            String buildUrl = build.getParametersProvider().get(PARAM_JENKINS_BUILD_URL);
-            if (!StringUtil.isEmpty(buildUrl)) {
-                return stripRunNumber(buildUrl);
-            }
-        }
-        return null;
+
+        return history.stream()
+            .limit(NUM_BUILDS_TO_CHECK)
+            .map(build -> build.getParametersProvider().get(PARAM_JENKINS_BUILD_URL))
+            .filter(buildUrl -> !StringUtil.isEmpty(buildUrl))
+            .findFirst()
+            .map(JenkinsBuildSummaryExtension::stripRunNumber)
+            .orElse(null);
     }
 
     @NotNull
