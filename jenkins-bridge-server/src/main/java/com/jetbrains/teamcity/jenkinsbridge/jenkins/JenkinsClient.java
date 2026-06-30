@@ -8,6 +8,7 @@ import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpClient;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpException;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpResponse;
 import com.jetbrains.teamcity.jenkinsbridge.model.GraphConfidence;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsArtifacts;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildParameters;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsCrumb;
@@ -223,6 +224,44 @@ public class JenkinsClient {
       }
       throw e;
     }
+  }
+
+  public JenkinsArtifacts getArtifacts(String jobName, int buildNumber) throws BridgeHttpException {
+    JenkinsBridgeSettings settings = settingsProvider.load();
+    String tree = "artifacts[fileName,relativePath]";
+    String url = settings.getJenkinsUrl()
+        + jenkinsJobPath(jobName)
+        + "/"
+        + buildNumber
+        + "/api/json?tree="
+        + encodeQueryValue(tree);
+
+    try {
+      String response = httpClient.get(url, settings.getJenkinsUser(), settings.getJenkinsToken(), "application/json");
+      return JenkinsArtifacts.fromJson(jsonParser.parse(response).getAsJsonObject());
+    } catch (BridgeHttpException e) {
+      if (e.getStatusCode() == 404) {
+        return JenkinsArtifacts.empty();
+      }
+      throw e;
+    }
+  }
+
+  public void streamArtifact(
+      String jobName,
+      int buildNumber,
+      String relativePath,
+      BridgeHttpClient.StreamHandler handler
+  ) throws BridgeHttpException {
+    JenkinsBridgeSettings settings = settingsProvider.load();
+    String url = settings.getJenkinsUrl()
+        + jenkinsJobPath(jobName)
+        + "/"
+        + buildNumber
+        + "/artifact/"
+        + encodeRelativePath(relativePath);
+
+    httpClient.getStream(url, settings.getJenkinsUser(), settings.getJenkinsToken(), "*/*", handler);
   }
 
   /**
@@ -778,6 +817,20 @@ public class JenkinsClient {
     for (String segment : segments) {
       if (segment.length() > 0) {
         result.append("/pipelines/").append(encodePathSegment(segment));
+      }
+    }
+    return result.toString();
+  }
+
+  private String encodeRelativePath(String relativePath) {
+    String[] segments = relativePath.split("/");
+    StringBuilder result = new StringBuilder();
+    for (String segment : segments) {
+      if (segment.length() > 0) {
+        if (result.length() > 0) {
+          result.append('/');
+        }
+        result.append(encodePathSegment(segment));
       }
     }
     return result.toString();

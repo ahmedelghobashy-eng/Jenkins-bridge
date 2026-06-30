@@ -38,6 +38,8 @@ public class BuildMirror {
   private boolean metadataLogSent;
   private boolean summaryLogSent;
   private boolean testsSynced;
+  private boolean artifactsSynced;
+  private String artifactSyncError;
   private boolean jenkinsBuildParametersLoaded;
   private Map<String, String> jenkinsBuildParameters;
   private String jenkinsResult;
@@ -65,6 +67,7 @@ public class BuildMirror {
     mirror.metadataLogSent = false;
     mirror.summaryLogSent = false;
     mirror.testsSynced = false;
+    mirror.artifactsSynced = false;
     mirror.jenkinsBuildParametersLoaded = false;
     mirror.createdAt = now;
     mirror.updatedAt = now;
@@ -188,6 +191,22 @@ public class BuildMirror {
 
   public void setTestsSynced(boolean testsSynced) {
     this.testsSynced = testsSynced;
+  }
+
+  public boolean isArtifactsSynced() {
+    return artifactsSynced;
+  }
+
+  public void setArtifactsSynced(boolean artifactsSynced) {
+    this.artifactsSynced = artifactsSynced;
+  }
+
+  public String getArtifactSyncError() {
+    return artifactSyncError;
+  }
+
+  public void setArtifactSyncError(String artifactSyncError) {
+    this.artifactSyncError = artifactSyncError;
   }
 
   public boolean isJenkinsBuildParametersLoaded() {

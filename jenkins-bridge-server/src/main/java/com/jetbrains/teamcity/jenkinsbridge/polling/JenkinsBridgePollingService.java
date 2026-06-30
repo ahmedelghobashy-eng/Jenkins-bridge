@@ -7,6 +7,7 @@ import com.jetbrains.teamcity.jenkinsbridge.persistence.BuildMirrorStore;
 import com.jetbrains.teamcity.jenkinsbridge.persistence.SyncState;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildParameters;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsArtifacts;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsLogChunk;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsPipelineGraph;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsStages;
@@ -377,6 +378,28 @@ public class JenkinsBridgePollingService {
       LOG.info("[Jenkins Bridge DEBUG] Read " + testReport.getTestCount()
           + " Jenkins test(s) for " + mirror.getJenkinsBuildKey());
       mirrorService.syncTestsIfNeeded(mirror, teamCityBuildId, testReport);
+    }
+    if (!buildInfo.isBuilding()
+        && !mirror.isArtifactsSynced()
+        && mirror.getSyncState() != SyncState.TEAMCITY_FINISHED) {
+      try {
+        JenkinsArtifacts artifacts = jenkinsClient.getArtifacts(mirror.getJenkinsJob(), mirror.getJenkinsBuildNumber());
+        LOG.info("[Jenkins Bridge DEBUG] Read " + artifacts.size()
+            + " Jenkins artifact(s) for " + mirror.getJenkinsBuildKey());
+        mirrorService.syncArtifactsIfNeeded(mirror, teamCityBuildId, artifacts, jenkinsClient);
+      } catch (Exception e) {
+        LOG.log(Level.WARNING, "Jenkins Bridge: artifact mirroring failed for "
+            + mirror.getJenkinsBuildKey() + "; finishing will continue", e);
+        mirror.setArtifactsSynced(true);
+        mirror.setArtifactSyncError(e.getClass().getSimpleName()
+            + (e.getMessage() == null ? "" : ": " + e.getMessage()));
+        try {
+          mirrorStore.saveMirror(mirror);
+        } catch (Exception saveError) {
+          LOG.log(Level.WARNING, "Jenkins Bridge: failed to persist artifact sync failure for "
+              + mirror.getJenkinsBuildKey(), saveError);
+        }
+      }
     }
     mirrorService.finishBuildIfNeeded(mirror, teamCityBuildId, buildInfo);
   }

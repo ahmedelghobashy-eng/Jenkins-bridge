@@ -3,6 +3,7 @@ package com.jetbrains.teamcity.jenkinsbridge.jenkins;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpClient;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpException;
 import com.jetbrains.teamcity.jenkinsbridge.http.BridgeHttpResponse;
+import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsArtifacts;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildInfo;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsCrumb;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsBuildParameters;
@@ -18,6 +19,7 @@ import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettings;
 import com.jetbrains.teamcity.jenkinsbridge.settings.JenkinsBridgeSettingsProvider;
 import org.junit.Test;
 
+import java.io.InputStream;
 import java.lang.reflect.Constructor;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -38,6 +40,66 @@ public class JenkinsClientTest {
 
     assertTrue(report.isEmpty());
     assertEquals("http://jenkins/job/folder/job/job/7/testReport/api/json?tree=suites%5Bname%2Ccases%5BclassName%2Cname%2Cstatus%2Cduration%2CerrorDetails%2CerrorStackTrace%2CskippedMessage%2Cstdout%2Cstderr%5D%5D", httpClient.url);
+  }
+
+  @Test
+  public void getArtifactsParsesArchivedArtifacts() throws Exception {
+    StubResponseHttpClient httpClient = new StubResponseHttpClient();
+    httpClient.body = "{\"artifacts\":["
+        + "{\"fileName\":\"app.jar\",\"relativePath\":\"target/app.jar\"},"
+        + "{\"fileName\":\"report.txt\",\"relativePath\":\"reports/unit/report.txt\"}"
+        + "]}";
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    JenkinsArtifacts artifacts = client.getArtifacts("folder/job", 7);
+
+    assertEquals("http://jenkins/job/folder/job/job/7/api/json?tree=artifacts%5BfileName%2CrelativePath%5D",
+        httpClient.url);
+    assertEquals(2, artifacts.size());
+    assertEquals("app.jar", artifacts.getArtifacts().get(0).getFileName());
+    assertEquals("reports/unit/report.txt", artifacts.getArtifacts().get(1).getRelativePath());
+  }
+
+  @Test
+  public void getArtifactsReturnsEmptyWhenArrayMissing() throws Exception {
+    StubResponseHttpClient httpClient = new StubResponseHttpClient();
+    httpClient.body = "{}";
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+
+    assertTrue(client.getArtifacts("job", 3).isEmpty());
+  }
+
+  @Test
+  public void streamArtifactEncodesEachPathSegment() throws Exception {
+    StubResponseHttpClient httpClient = new StubResponseHttpClient();
+    httpClient.streamText = "bytes";
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), httpClient);
+    final StringBuilder captured = new StringBuilder();
+
+    client.streamArtifact("folder/job", 7, "dir with space/report #1.txt",
+        new BridgeHttpClient.StreamHandler() {
+          public void handle(InputStream inputStream) throws java.io.IOException {
+            int read;
+            while ((read = inputStream.read()) != -1) {
+              captured.append((char)read);
+            }
+          }
+        });
+
+    assertEquals("http://jenkins/job/folder/job/job/7/artifact/dir%20with%20space/report%20%231.txt",
+        httpClient.url);
+    assertEquals("bytes", captured.toString());
+  }
+
+  @Test(expected = BridgeHttpException.class)
+  public void streamArtifactPropagatesHttpFailures() throws Exception {
+    JenkinsClient client = new JenkinsClient(new StaticSettingsProvider(), new NotFoundHttpClient());
+
+    client.streamArtifact("job", 7, "missing.bin", new BridgeHttpClient.StreamHandler() {
+      public void handle(InputStream inputStream) {
+        // never reached
+      }
+    });
   }
 
   @Test
@@ -514,6 +576,7 @@ public class JenkinsClientTest {
   private static class StubResponseHttpClient extends BridgeHttpClient {
     private String url;
     private String body = "";
+    private String streamText = "";
     private final Map<String, String> headers = new LinkedHashMap<String, String>();
 
     @Override
@@ -526,6 +589,17 @@ public class JenkinsClientTest {
     public String get(String url, String user, String password, String accept) {
       this.url = url;
       return body;
+    }
+
+    @Override
+    public void getStream(String url, String user, String password, String accept, StreamHandler handler)
+        throws BridgeHttpException {
+      this.url = url;
+      try {
+        handler.handle(new java.io.ByteArrayInputStream(streamText.getBytes("UTF-8")));
+      } catch (java.io.IOException e) {
+        throw new BridgeHttpException("GET", url, e);
+      }
     }
   }
 
@@ -626,6 +700,13 @@ public class JenkinsClientTest {
 
     @Override
     public String get(String url, String user, String password, String accept) throws BridgeHttpException {
+      this.url = url;
+      throw new BridgeHttpException("GET", url, 404, "not found");
+    }
+
+    @Override
+    public void getStream(String url, String user, String password, String accept, StreamHandler handler)
+        throws BridgeHttpException {
       this.url = url;
       throw new BridgeHttpException("GET", url, 404, "not found");
     }
