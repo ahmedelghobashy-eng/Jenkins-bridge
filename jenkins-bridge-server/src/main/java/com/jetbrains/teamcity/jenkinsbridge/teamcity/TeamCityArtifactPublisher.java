@@ -20,9 +20,6 @@ import java.util.List;
 
 public class TeamCityArtifactPublisher {
 
-  // TODO: Fetch the actual artifact size from the API.
-  private static final long PLACEHOLDER_ARTIFACT_SIZE = 42L;
-
   @NotNull
   private static final Charset OUR_CHARSET = StandardCharsets.UTF_8;
 
@@ -65,9 +62,7 @@ public class TeamCityArtifactPublisher {
     List<ArtifactData> artifactDataList = new ArrayList<>();
     for (JenkinsArtifact artifact : artifacts) {
       String path = artifact.getRelativePath();
-      if (path != null) {
-        artifactDataList.add(ArtifactDataInstance.create(path, PLACEHOLDER_ARTIFACT_SIZE));
-      }
+      artifactDataList.add(ArtifactDataInstance.create(path, artifact.getSize()));
     }
 
     if (artifactDataList.isEmpty()) {
