@@ -1,11 +1,13 @@
 package com.jetbrains.teamcity.jenkinsbridge.teamcity;
 
+import com.intellij.openapi.diagnostic.Logger;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsArtifact;
 import jetbrains.buildServer.ArtifactsConstants;
 import jetbrains.buildServer.artifacts.ArtifactData;
 import jetbrains.buildServer.artifacts.ArtifactDataInstance;
 import jetbrains.buildServer.artifacts.util.ArtifactListUtil;
 import jetbrains.buildServer.artifacts.util.SerializableArtifactListData;
+import jetbrains.buildServer.serverSide.BuildAttributes;
 import jetbrains.buildServer.serverSide.RunningBuildEx;
 import org.jetbrains.annotations.NotNull;
 
@@ -19,6 +21,8 @@ import java.util.Collections;
 import java.util.List;
 
 public class TeamCityArtifactPublisher {
+
+  private static final Logger LOG = Logger.getInstance(TeamCityArtifactPublisher.class.getName());
 
   @NotNull
   private static final Charset OUR_CHARSET = StandardCharsets.UTF_8;
@@ -48,16 +52,19 @@ public class TeamCityArtifactPublisher {
       throw new IOException("TeamCity build " + buildId + " is already finished");
     }
 
-    String storageFeatureId = "JENKINS_STORAGE_EXT_2";
+    Object storageSettingReference = runningBuild
+        .getBuildPromotion()
+        .getAttribute(BuildAttributes.STORAGE_SETTINGS_REFERENCE);
+    String storageFeatureId = storageSettingReference instanceof String
+        ? (String) storageSettingReference
+        : null;
 
-    // TODO: Figure out why the ID is not loaded at this point.
-//    String storageFeatureId = runningBuild.getBuildPromotion().getParameterValue(ArtifactStorageSettings.STORAGE_FEATURE_ID);
-//    if (storageFeatureId == null || storageFeatureId.isEmpty()) {
-//      LOG.warn("Jenkins Bridge: 'Jenkins' artifact storage is not configured as the active storage for "
-//          + "TeamCity build " + buildId + "; skipping artifact registration. "
-//          + "To enable artifact serving, configure 'Jenkins' as the project artifact storage.");
-//      return;
-//    }
+    if (storageFeatureId == null || storageFeatureId.isEmpty()) {
+      LOG.warn("'Jenkins' artifact storage is not configured as the active storage for "
+          + "TeamCity project " + runningBuild.getProjectExternalId() + ". Skipping artifact registration. "
+          + "To enable artifact serving, configure 'Jenkins' as the project artifact storage.");
+      return;
+    }
 
     List<ArtifactData> artifactDataList = new ArrayList<>();
     for (JenkinsArtifact artifact : artifacts) {
