@@ -1,6 +1,6 @@
 package com.jetbrains.teamcity.jenkinsbridge.artifactstorage;
 
-import com.intellij.openapi.diagnostic.Logger;
+import com.jetbrains.teamcity.jenkinsbridge.jenkins.JenkinsClient;
 import jetbrains.buildServer.serverSide.BuildPromotion;
 import jetbrains.buildServer.serverSide.artifacts.StoredBuildArtifactInfo;
 import jetbrains.buildServer.web.openapi.artifacts.ArtifactDownloadProcessor;
@@ -12,7 +12,16 @@ import java.io.IOException;
 
 public class JenkinsArtifactDownloadProcessor implements ArtifactDownloadProcessor {
 
-  private final static Logger LOG = Logger.getInstance(JenkinsArtifactDownloadProcessor.class.getName());
+  private final JenkinsClient myJenkinsClient;
+  private final JenkinsArtifactInfoUtils myJenkinsArtifactInfoUtils;
+
+  public JenkinsArtifactDownloadProcessor(
+      @NotNull JenkinsClient jenkinsClient,
+      @NotNull JenkinsArtifactInfoUtils jenkinsArtifactInfoUtils
+  ) {
+    myJenkinsClient = jenkinsClient;
+    myJenkinsArtifactInfoUtils = jenkinsArtifactInfoUtils;
+  }
 
   @NotNull
   @Override
@@ -21,10 +30,17 @@ public class JenkinsArtifactDownloadProcessor implements ArtifactDownloadProcess
   }
 
   @Override
-  public boolean processDownload(@NotNull StoredBuildArtifactInfo storedBuildArtifactInfo,
+  public boolean processDownload(@NotNull StoredBuildArtifactInfo info,
                                  @NotNull BuildPromotion buildPromotion,
                                  @NotNull HttpServletRequest httpServletRequest,
                                  @NotNull HttpServletResponse httpServletResponse) throws IOException {
-    return false; // TODO: Implement Jenkins artifact download processing
+    String job = myJenkinsArtifactInfoUtils.jenkinsJob(info);
+    int buildNumber = myJenkinsArtifactInfoUtils.jenkinsBuildNumber(info);
+    String relativePath = myJenkinsArtifactInfoUtils.jenkinsRelativePath(info);
+
+    String jenkinsUrl = myJenkinsClient.artifactUrl(job, buildNumber, relativePath);
+    httpServletResponse.sendRedirect(jenkinsUrl);
+    return true;
   }
+
 }

@@ -247,6 +247,20 @@ public class JenkinsClient {
     }
   }
 
+  /**
+   * Builds the absolute Jenkins download URL for a single build artifact:
+   * {@code <jenkinsUrl>/job/<job>/<buildNumber>/artifact/<relativePath>}.
+   */
+  public String artifactUrl(String jobName, int buildNumber, String relativePath) {
+    JenkinsBridgeSettings settings = settingsProvider.load();
+    return settings.getJenkinsUrl()
+        + jenkinsJobPath(jobName)
+        + "/"
+        + buildNumber
+        + "/artifact/"
+        + encodeRelativePath(relativePath);
+  }
+
   public void streamArtifact(
       String jobName,
       int buildNumber,
@@ -254,13 +268,7 @@ public class JenkinsClient {
       BridgeHttpClient.StreamHandler handler
   ) throws BridgeHttpException {
     JenkinsBridgeSettings settings = settingsProvider.load();
-    String url = settings.getJenkinsUrl()
-        + jenkinsJobPath(jobName)
-        + "/"
-        + buildNumber
-        + "/artifact/"
-        + encodeRelativePath(relativePath);
-
+    String url = artifactUrl(jobName, buildNumber, relativePath);
     httpClient.getStream(url, settings.getJenkinsUser(), settings.getJenkinsToken(), "*/*", handler);
   }
 
