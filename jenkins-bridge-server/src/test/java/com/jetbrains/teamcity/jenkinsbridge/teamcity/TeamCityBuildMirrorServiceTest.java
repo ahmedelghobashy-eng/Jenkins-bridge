@@ -255,7 +255,7 @@ public class TeamCityBuildMirrorServiceTest {
     String failPath;
 
     CapturingArtifactPublisher() {
-      super(null);
+      super(null, null);
     }
 
     @Override

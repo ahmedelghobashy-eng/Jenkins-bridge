@@ -1,6 +1,7 @@
 package com.jetbrains.teamcity.jenkinsbridge.teamcity;
 
 import jetbrains.buildServer.serverSide.RunningBuildEx;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.ByteArrayInputStream;
@@ -15,7 +16,7 @@ public class TeamCityArtifactPublisherTest {
   @Test
   public void publishesToResolvedRunningBuild() throws Exception {
     CapturingRunningBuild capture = new CapturingRunningBuild();
-    TeamCityArtifactPublisher publisher = new TeamCityArtifactPublisher(new FixedLocator(capture.proxy()));
+    TeamCityArtifactPublisher publisher = new TeamCityArtifactPublisher(new FixedLocator(capture.proxy()), null);
 
     publisher.publishArtifact(42L, "jenkins-artifacts/out.txt",
         new ByteArrayInputStream("hello".getBytes("UTF-8")));
@@ -26,7 +27,7 @@ public class TeamCityArtifactPublisherTest {
 
   @Test(expected = java.io.IOException.class)
   public void failsWhenBuildIsNoLongerRunning() throws Exception {
-    TeamCityArtifactPublisher publisher = new TeamCityArtifactPublisher(new FixedLocator(null));
+    TeamCityArtifactPublisher publisher = new TeamCityArtifactPublisher(new FixedLocator(null), null);
 
     publisher.publishArtifact(42L, "jenkins-artifacts/out.txt",
         new ByteArrayInputStream("hello".getBytes("UTF-8")));
@@ -51,9 +52,9 @@ public class TeamCityArtifactPublisherTest {
     String content;
 
     RunningBuildEx proxy() {
-      return (RunningBuildEx)Proxy.newProxyInstance(
+      return (RunningBuildEx) Proxy.newProxyInstance(
           RunningBuildEx.class.getClassLoader(),
-          new Class<?>[] {RunningBuildEx.class},
+          new Class<?>[]{RunningBuildEx.class},
           this);
     }
 
@@ -63,8 +64,8 @@ public class TeamCityArtifactPublisherTest {
           && args.length == 2
           && args[0] instanceof String
           && args[1] instanceof InputStream) {
-        path = (String)args[0];
-        content = read((InputStream)args[1]);
+        path = (String) args[0];
+        content = read((InputStream) args[1]);
         return null;
       }
       if ("toString".equals(method.getName())) {
@@ -93,7 +94,7 @@ public class TeamCityArtifactPublisherTest {
       StringBuilder result = new StringBuilder();
       int read;
       while ((read = inputStream.read()) != -1) {
-        result.append((char)read);
+        result.append((char) read);
       }
       return result.toString();
     }

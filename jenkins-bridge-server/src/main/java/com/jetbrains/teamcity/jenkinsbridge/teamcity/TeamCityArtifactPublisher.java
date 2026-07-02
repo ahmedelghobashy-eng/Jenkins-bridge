@@ -1,13 +1,13 @@
 package com.jetbrains.teamcity.jenkinsbridge.teamcity;
 
 import com.intellij.openapi.diagnostic.Logger;
+import com.jetbrains.teamcity.jenkinsbridge.artifactstorage.JenkinsStorageAutomaticActivator;
 import com.jetbrains.teamcity.jenkinsbridge.model.JenkinsArtifact;
 import jetbrains.buildServer.ArtifactsConstants;
 import jetbrains.buildServer.artifacts.ArtifactData;
 import jetbrains.buildServer.artifacts.ArtifactDataInstance;
 import jetbrains.buildServer.artifacts.util.ArtifactListUtil;
 import jetbrains.buildServer.artifacts.util.SerializableArtifactListData;
-import jetbrains.buildServer.serverSide.BuildAttributes;
 import jetbrains.buildServer.serverSide.RunningBuildEx;
 import org.jetbrains.annotations.NotNull;
 
@@ -27,15 +27,20 @@ public class TeamCityArtifactPublisher {
   @NotNull
   private static final Charset OUR_CHARSET = StandardCharsets.UTF_8;
 
-  private final TeamCityRunningBuildLocator buildLocator;
+  private final TeamCityRunningBuildLocator myBuildLocator;
+  private final JenkinsStorageAutomaticActivator myStorageActivator;
 
-  public TeamCityArtifactPublisher(TeamCityRunningBuildLocator buildLocator) {
-    this.buildLocator = buildLocator;
+  public TeamCityArtifactPublisher(
+      TeamCityRunningBuildLocator buildLocator,
+      JenkinsStorageAutomaticActivator storageActivator
+  ) {
+    myBuildLocator = buildLocator;
+    myStorageActivator = storageActivator;
   }
 
   @Deprecated
   public void publishArtifact(long buildId, String artifactPath, InputStream inputStream) throws IOException {
-    RunningBuildEx runningBuild = buildLocator.findRunningBuild(buildId);
+    RunningBuildEx runningBuild = myBuildLocator.findRunningBuild(buildId);
     if (runningBuild == null) {
       throw new IOException("TeamCity build " + buildId + " is already finished");
     }
@@ -47,22 +52,21 @@ public class TeamCityArtifactPublisher {
    * file to {@link ArtifactsConstants#ARTIFACT_LIST_PATH}.
    */
   public void publishArtifactList(long buildId, List<JenkinsArtifact> artifacts) throws IOException {
-    RunningBuildEx runningBuild = buildLocator.findRunningBuild(buildId);
+    RunningBuildEx runningBuild = myBuildLocator.findRunningBuild(buildId);
     if (runningBuild == null) {
       throw new IOException("TeamCity build " + buildId + " is already finished");
     }
 
-    Object storageSettingReference = runningBuild
-        .getBuildPromotion()
-        .getAttribute(BuildAttributes.STORAGE_SETTINGS_REFERENCE);
-    String storageFeatureId = storageSettingReference instanceof String
-        ? (String) storageSettingReference
-        : null;
+    String msg = "'Jenkins' artifact storage could not be configured as the active storage for TeamCity project " + runningBuild.getProjectExternalId() + ". Skipping artifact registration.";
 
-    if (storageFeatureId == null || storageFeatureId.isEmpty()) {
-      LOG.warn("'Jenkins' artifact storage is not configured as the active storage for "
-          + "TeamCity project " + runningBuild.getProjectExternalId() + ". Skipping artifact registration. "
-          + "To enable artifact serving, configure 'Jenkins' as the project artifact storage.");
+    String projectExternalId = runningBuild.getProjectExternalId();
+    if (projectExternalId == null) {
+      LOG.warn(msg);
+      return;
+    }
+    String storageFeatureId = myStorageActivator.activateJenkinsStorage(projectExternalId);
+    if (storageFeatureId == null) {
+      LOG.warn(msg);
       return;
     }
 
